@@ -12,33 +12,30 @@ import {
 } from '../utils/jsonOperations';
 import { SAMPLE_DATASETS } from '../utils/sampleData';
 
-const LOCAL_STORAGE_KEY = 'firebase_rtdb_local_editor_draft_v3';
-const LOCAL_STORAGE_META_KEY = 'firebase_rtdb_local_editor_meta_v3';
 const MAX_HISTORY = 50;
 
 export function useJsonEditor() {
+  // Start with clean empty JSON object by default (in-memory only, no localStorage persistence)
   const [data, setData] = useState<any>(() => {
+    // Clear legacy draft keys from localStorage if present
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch (e) {
-      console.warn('Failed to parse local draft:', e);
+      localStorage.removeItem('firebase_rtdb_local_editor_draft');
+      localStorage.removeItem('firebase_rtdb_local_editor_draft_v2');
+      localStorage.removeItem('firebase_rtdb_local_editor_draft_v3');
+      localStorage.removeItem('firebase_rtdb_local_editor_meta');
+      localStorage.removeItem('firebase_rtdb_local_editor_meta_v3');
+    } catch {
+      // ignore
     }
-    return SAMPLE_DATASETS.textbook_db || SAMPLE_DATASETS.ecommerce;
+    return SAMPLE_DATASETS.textbook_db || {};
   });
 
-  const [fileName, setFileName] = useState<string>(() => {
-    return localStorage.getItem(LOCAL_STORAGE_META_KEY) || 'textbook_db.json';
-  });
-
+  const [fileName, setFileName] = useState<string>('textbook_db.json');
   const [selectedPath, setSelectedPath] = useState<NodePath>([]);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => {
-    // Default expand root and 1 level deep
     const initialSet = new Set<string>(['root']);
     if (data && typeof data === 'object') {
-      Object.keys(data).slice(0, 5).forEach(k => initialSet.add(`root/${k}`));
+      Object.keys(data).slice(0, 10).forEach(k => initialSet.add(`root/${k}`));
     }
     return initialSet;
   });
@@ -50,15 +47,21 @@ export function useJsonEditor() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
   const [appMode, setAppMode] = useState<AppMode>('local');
 
-  // Auto-save working copy to localStorage
+  // Warn user before refreshing or closing tab if they have data/unsaved changes in Local Mode
   useEffect(() => {
-    try {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
-      localStorage.setItem(LOCAL_STORAGE_META_KEY, fileName);
-    } catch (e) {
-      console.warn('LocalStorage save failed (data may be too large):', e);
-    }
-  }, [data, fileName]);
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (appMode === 'local' && (hasUnsavedChanges || (data && Object.keys(data).length > 0))) {
+        e.preventDefault();
+        e.returnValue = 'Warning: Any unsaved local JSON data will be lost upon refreshing or closing this page. Please export your file or connect to Live Firebase RTDB.';
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [appMode, hasUnsavedChanges, data]);
 
   // Helper to push history entry before mutation
   const pushStateToHistory = useCallback((newData: any) => {
@@ -89,26 +92,21 @@ export function useJsonEditor() {
   const expandPathAncestors = useCallback((path: NodePath) => {
     setExpandedPaths(prev => {
       const next = new Set(prev);
+      const current: NodePath = [];
       next.add('root');
-      let currentPathStr = 'root';
-      for (const segment of path) {
-        currentPathStr += `/${segment}`;
-        next.add(currentPathStr);
-      }
+      path.forEach(seg => {
+        current.push(seg);
+        next.add(pathToString(current));
+      });
       return next;
     });
   }, []);
 
-  const selectNode = useCallback((path: NodePath) => {
-    setSelectedPath(path);
-    expandPathAncestors(path);
-  }, [expandPathAncestors]);
-
   const expandAllPaths = useCallback(() => {
-    const nextSet = new Set<string>();
+    const nextSet = new Set<string>(['root']);
     function walk(val: any, path: NodePath) {
-      nextSet.add(pathToString(path));
       if (val !== null && typeof val === 'object') {
+        nextSet.add(pathToString(path));
         if (Array.isArray(val)) {
           val.forEach((item, idx) => walk(item, [...path, idx]));
         } else {
@@ -125,7 +123,7 @@ export function useJsonEditor() {
   }, []);
 
   const expandToLevel = useCallback((level: number) => {
-    const nextSet = new Set<string>();
+    const nextSet = new Set<string>(['root']);
     function walk(val: any, path: NodePath) {
       if (path.length <= level) {
         nextSet.add(pathToString(path));
@@ -175,43 +173,32 @@ export function useJsonEditor() {
 
   const deleteNodeAtPath = useCallback((path: NodePath) => {
     if (path.length === 0) {
+      // Clear entire database
       pushStateToHistory({});
       setSelectedPath([]);
       return;
     }
     const updated = deleteValueByPath(data, path);
     pushStateToHistory(updated);
-
-    // Adjust selected path if deleted
-    if (isPathEqual(selectedPath, path)) {
-      const parent = path.slice(0, -1);
-      setSelectedPath(parent);
+    if (isPathEqual(selectedPath, path) || pathToString(selectedPath).startsWith(pathToString(path))) {
+      const parentPath = path.slice(0, -1);
+      setSelectedPath(parentPath);
     }
   }, [data, selectedPath, pushStateToHistory]);
 
-  const addChildNode = useCallback((path: NodePath, key: string, value: any) => {
-    const updated = insertChildByPath(data, path, key, value);
+  const addChildNode = useCallback((parentPath: NodePath, key: string, value: any) => {
+    const updated = insertChildByPath(data, parentPath, key, value);
     pushStateToHistory(updated);
-
-    // Expand path and select newly added child node
-    const target = getValueByPath(data, path);
-    let childPath: NodePath;
-    if (Array.isArray(target)) {
-      childPath = [...path, target.length];
-    } else {
-      childPath = [...path, key];
-    }
-    selectNode(childPath);
-  }, [data, pushStateToHistory, selectNode]);
+    expandPathAncestors([...parentPath, key]);
+    setSelectedPath([...parentPath, key]);
+  }, [data, pushStateToHistory, expandPathAncestors]);
 
   const renameKey = useCallback((parentPath: NodePath, oldKey: string, newKey: string) => {
     const updated = renameKeyByPath(data, parentPath, oldKey, newKey);
     pushStateToHistory(updated);
-
-    // If active selected path was inside this key, update selection
     if (selectedPath.length > parentPath.length && selectedPath[parentPath.length] === oldKey) {
-      const newSel = [...parentPath, newKey, ...selectedPath.slice(parentPath.length + 1)];
-      setSelectedPath(newSel);
+      const newSelected = [...parentPath, newKey, ...selectedPath.slice(parentPath.length + 1)];
+      setSelectedPath(newSelected);
     }
   }, [data, selectedPath, pushStateToHistory]);
 
@@ -219,106 +206,67 @@ export function useJsonEditor() {
   const undo = useCallback(() => {
     if (undoStack.length === 0) return;
     const last = undoStack[undoStack.length - 1];
-    setRedoStack(prev => [{ data, selectedPath, timestamp: Date.now() }, ...prev]);
     setUndoStack(prev => prev.slice(0, -1));
+    setRedoStack(prev => [...prev, { data, selectedPath, timestamp: Date.now() }]);
     setData(last.data);
     setSelectedPath(last.selectedPath);
-  }, [data, selectedPath, undoStack]);
+    setHasUnsavedChanges(true);
+  }, [undoStack, data, selectedPath]);
 
   const redo = useCallback(() => {
     if (redoStack.length === 0) return;
-    const first = redoStack[0];
+    const next = redoStack[redoStack.length - 1];
+    setRedoStack(prev => prev.slice(0, -1));
     setUndoStack(prev => [...prev, { data, selectedPath, timestamp: Date.now() }]);
-    setRedoStack(prev => prev.slice(1));
-    setData(first.data);
-    setSelectedPath(first.selectedPath);
-  }, [data, selectedPath, redoStack]);
+    setData(next.data);
+    setSelectedPath(next.selectedPath);
+    setHasUnsavedChanges(true);
+  }, [redoStack, data, selectedPath]);
 
-  // Export / Direct Save
-  const exportJsonFile = useCallback((customFilename?: string) => {
-    const targetName = customFilename || fileName || 'data.json';
+  // Search execution
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    return searchJsonTree(data, searchQuery);
+  }, [data, searchQuery]);
+
+  const selectNode = useCallback((path: NodePath) => {
+    setSelectedPath(path);
+    if (path.length > 0) {
+      expandPathAncestors(path);
+    }
+  }, [expandPathAncestors]);
+
+  // Export & Save File
+  const exportJsonFile = useCallback(() => {
     const jsonStr = JSON.stringify(data, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = targetName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName.endsWith('.json') ? fileName : `${fileName}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
     URL.revokeObjectURL(url);
     setHasUnsavedChanges(false);
   }, [data, fileName]);
 
   const saveToFileSystem = useCallback(async () => {
-    const jsonStr = JSON.stringify(data, null, 2);
-
-    // If fileHandle exists from File System Access API
-    if (fileHandle && typeof fileHandle.createWritable === 'function') {
+    // If native File System Access API is supported and we have a handle
+    if (fileHandle && 'createWritable' in fileHandle) {
       try {
         const writable = await fileHandle.createWritable();
-        await writable.write(jsonStr);
+        await writable.write(JSON.stringify(data, null, 2));
         await writable.close();
         setHasUnsavedChanges(false);
-        return { success: true, message: `Successfully saved to ${fileName}` };
+        alert(`Successfully saved directly to ${fileName}`);
+        return;
       } catch (err: any) {
-        console.warn('File System Access API save error:', err);
+        console.warn('File handle write failed, falling back to export:', err);
       }
     }
-
-    // Try showSaveFilePicker if available
-    if ('showSaveFilePicker' in window) {
-      try {
-        const handle = await (window as any).showSaveFilePicker({
-          suggestedName: fileName || 'data.json',
-          types: [{
-            description: 'JSON Files',
-            accept: { 'application/json': ['.json'] },
-          }],
-        });
-        const writable = await handle.createWritable();
-        await writable.write(jsonStr);
-        await writable.close();
-        setFileHandle(handle);
-        setFileName(handle.name);
-        setHasUnsavedChanges(false);
-        return { success: true, message: `Saved to ${handle.name}` };
-      } catch (err: any) {
-        if (err.name === 'AbortError') return { success: false, message: 'Save cancelled' };
-      }
-    }
-
-    // Standard fallback download
     exportJsonFile();
-    return { success: true, message: 'Downloaded updated JSON file' };
-  }, [data, fileName, fileHandle, exportJsonFile]);
-
-  // Search matches computation
-  const searchResults: SearchMatch[] = useMemo(() => {
-    return searchJsonTree(data, searchQuery);
-  }, [data, searchQuery]);
-
-  // Keyboard shortcut listener (Ctrl+Z, Ctrl+Y, Ctrl+S)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-      const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
-
-      if (cmdOrCtrl && !e.shiftKey && e.key.toLowerCase() === 'z') {
-        e.preventDefault();
-        undo();
-      } else if ((cmdOrCtrl && e.shiftKey && e.key.toLowerCase() === 'z') || (cmdOrCtrl && e.key.toLowerCase() === 'y')) {
-        e.preventDefault();
-        redo();
-      } else if (cmdOrCtrl && e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        saveToFileSystem();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [undo, redo, saveToFileSystem]);
+  }, [fileHandle, data, fileName, exportJsonFile]);
 
   return {
     data,
@@ -329,7 +277,6 @@ export function useJsonEditor() {
     redoStack,
     searchQuery,
     searchResults,
-    fileHandle,
     hasUnsavedChanges,
     appMode,
     setAppMode,

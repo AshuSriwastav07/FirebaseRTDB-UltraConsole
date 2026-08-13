@@ -204,6 +204,24 @@ export const App: React.FC = () => {
         </div>
       )}
 
+      {/* Local Mode In-Memory Session Warning Banner */}
+      {appMode === 'local' && (
+        <div className="bg-sky-500/10 border-b border-sky-500/20 px-4 py-1.5 text-[11px] text-sky-300 font-sans flex items-center justify-between">
+          <div className="flex items-center gap-2 font-mono">
+            <ShieldAlert className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+            <span>
+              <strong className="text-sky-200">In-Memory Session:</strong> Local JSON edits are not saved across browser refreshes. Export your file or connect to Live Firebase RTDB to keep data.
+            </span>
+          </div>
+          <button
+            onClick={() => exportJsonFile()}
+            className="text-[10px] bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 border border-sky-500/30 px-2 py-0.5 rounded font-semibold transition"
+          >
+            Export JSON File
+          </button>
+        </div>
+      )}
+
       {/* Path Breadcrumb Bar */}
       <Breadcrumb
         selectedPath={selectedPath}

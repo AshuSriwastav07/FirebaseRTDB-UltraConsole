@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-firebase-dark text-slate-200 antialiased font-sans;
+  }
+}
+
+/* Custom Firebase dark theme scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #121820;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a3443;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3e4d63;
+}

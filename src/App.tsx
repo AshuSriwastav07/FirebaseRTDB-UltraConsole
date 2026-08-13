@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useJsonEditor } from './hooks/useJsonEditor';
 import { useFirebaseRtdb } from './hooks/useFirebaseRtdb';
 import { TopBar } from './components/TopBar';
@@ -9,7 +9,7 @@ import { RawJsonModal } from './components/Modals/RawJsonModal';
 import { FirebaseConfigModal } from './components/Modals/FirebaseConfigModal';
 import { getValueByPath } from './utils/jsonOperations';
 import { FirebaseConfig, AppMode } from './types/json';
-import { Flame, Database, Plus, Sparkles, ShieldAlert } from 'lucide-react';
+import { Flame, ShieldAlert, ShieldCheck } from 'lucide-react';
 
 export const App: React.FC = () => {
   const {
@@ -44,14 +44,18 @@ export const App: React.FC = () => {
 
   const [isRawJsonModalOpen, setIsRawJsonModalOpen] = useState(false);
   const [isFirebaseConfigModalOpen, setIsFirebaseConfigModalOpen] = useState(false);
-  const [firebaseConfig, setFirebaseConfig] = useState<FirebaseConfig | null>(() => {
+
+  // 100% Transient In-Memory Firebase Credentials State (Never saved to localStorage or disk)
+  const [firebaseConfig, setFirebaseConfig] = useState<FirebaseConfig | null>(null);
+
+  // Purge any legacy localStorage config items on mount
+  useEffect(() => {
     try {
-      const saved = localStorage.getItem('firebase_rtdb_config');
-      return saved ? JSON.parse(saved) : null;
+      localStorage.removeItem('firebase_rtdb_config');
     } catch {
-      return null;
+      // ignore
     }
-  });
+  }, []);
 
   const {
     liveData,
@@ -69,7 +73,11 @@ export const App: React.FC = () => {
 
   const handleSaveFirebaseConfig = (cfg: FirebaseConfig) => {
     setFirebaseConfig(cfg);
-    localStorage.setItem('firebase_rtdb_config', JSON.stringify(cfg));
+  };
+
+  const handlePurgeCredentials = () => {
+    setFirebaseConfig(null);
+    setAppMode('local');
   };
 
   const handleSelectMode = (mode: AppMode) => {
@@ -158,7 +166,7 @@ export const App: React.FC = () => {
   const selectedNodeValue = getValueByPath(activeData, selectedPath);
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-firebase-dark text-slate-200">
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-firebase-dark text-slate-200 font-sans">
       {/* Top Bar */}
       <TopBar
         fileName={fileName}
@@ -195,12 +203,14 @@ export const App: React.FC = () => {
               {firebaseError ? `Firebase Error: ${firebaseError}` : 'Live Firebase RTDB mode selected. Enter your Database URL to connect.'}
             </span>
           </div>
-          <button
-            onClick={() => setIsFirebaseConfigModalOpen(true)}
-            className="px-3 py-1 bg-amber-500 text-slate-950 font-bold rounded hover:bg-amber-400 transition text-xs shadow"
-          >
-            Enter Firebase Database Credentials
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsFirebaseConfigModalOpen(true)}
+              className="px-3 py-1 bg-amber-500 text-slate-950 font-bold rounded hover:bg-amber-400 transition text-xs shadow"
+            >
+              Enter Firebase Database Credentials
+            </button>
+          </div>
         </div>
       )}
 
@@ -210,7 +220,7 @@ export const App: React.FC = () => {
           <div className="flex items-center gap-2 font-mono">
             <ShieldAlert className="w-3.5 h-3.5 text-sky-400 shrink-0" />
             <span>
-              <strong className="text-sky-200">In-Memory Session:</strong> Local JSON edits are not saved across browser refreshes. Export your file or connect to Live Firebase RTDB to keep data.
+              <strong className="text-sky-200">Zero-Storage Session:</strong> Credentials and local JSON edits are kept 100% in active memory. No data is stored anywhere on disk or local storage.
             </span>
           </div>
           <button
@@ -272,6 +282,7 @@ export const App: React.FC = () => {
         config={firebaseConfig}
         onSave={handleSaveFirebaseConfig}
         onClose={() => setIsFirebaseConfigModalOpen(false)}
+        onPurgeCredentials={handlePurgeCredentials}
       />
     </div>
   );

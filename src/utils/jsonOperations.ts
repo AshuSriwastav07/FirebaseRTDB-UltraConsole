@@ -1,5 +1,11 @@
 import { DataType, NodePath, SearchMatch } from '../types/json';
 
+// Prototype pollution guard
+export function isUnsafeKey(key: string | number): boolean {
+  const s = String(key);
+  return s === '__proto__' || s === 'constructor' || s === 'prototype';
+}
+
 export function getType(val: any): DataType {
   if (val === null) return 'null';
   if (Array.isArray(val)) return 'array';
@@ -30,6 +36,7 @@ export function getValueByPath(data: any, path: NodePath): any {
   if (!path || path.length === 0) return data;
   let current = data;
   for (const segment of path) {
+    if (isUnsafeKey(segment)) return undefined;
     if (current === undefined || current === null) return undefined;
     current = current[segment];
   }
@@ -41,6 +48,8 @@ export function setValueByPath(data: any, path: NodePath, newValue: any): any {
 
   const clone = Array.isArray(data) ? [...data] : { ...data };
   const [head, ...tail] = path;
+
+  if (isUnsafeKey(head)) return data;
 
   if (tail.length === 0) {
     if (Array.isArray(clone)) {
@@ -60,6 +69,7 @@ export function deleteValueByPath(data: any, path: NodePath): any {
   if (path.length === 0) return null;
 
   const [head, ...tail] = path;
+  if (isUnsafeKey(head)) return data;
 
   if (tail.length === 0) {
     if (Array.isArray(data)) {
@@ -88,6 +98,8 @@ export function deleteValueByPath(data: any, path: NodePath): any {
 }
 
 export function insertChildByPath(data: any, path: NodePath, key: string | number, value: any): any {
+  if (isUnsafeKey(key)) return data;
+
   const target = getValueByPath(data, path);
   if (target === undefined || target === null) return data;
 
@@ -96,84 +108,76 @@ export function insertChildByPath(data: any, path: NodePath, key: string | numbe
   if (Array.isArray(target)) {
     updatedTarget = [...target, value];
   } else if (typeof target === 'object') {
-    // Preserve existing keys and append new key
     updatedTarget = { ...target, [key]: value };
   } else {
-    // Target is a primitive; convert to object containing new key
-    updatedTarget = { [key]: value };
+    return data;
   }
 
   return setValueByPath(data, path, updatedTarget);
 }
 
 export function renameKeyByPath(data: any, parentPath: NodePath, oldKey: string, newKey: string): any {
-  if (oldKey === newKey) return data;
-  const target = getValueByPath(data, parentPath);
+  if (isUnsafeKey(oldKey) || isUnsafeKey(newKey)) return data;
 
-  if (!target || typeof target !== 'object' || Array.isArray(target)) return data;
+  const parent = getValueByPath(data, parentPath);
+  if (!parent || typeof parent !== 'object' || Array.isArray(parent)) return data;
 
-  // Reconstruct object maintaining original key insertion order
-  const updatedTarget: Record<string, any> = {};
-  for (const k of Object.keys(target)) {
+  const updatedParent: any = {};
+  for (const k of Object.keys(parent)) {
     if (k === oldKey) {
-      updatedTarget[newKey] = target[oldKey];
+      updatedParent[newKey] = parent[oldKey];
     } else {
-      updatedTarget[k] = target[k];
+      updatedParent[k] = parent[k];
     }
   }
 
-  return setValueByPath(data, parentPath, updatedTarget);
+  return setValueByPath(data, parentPath, updatedParent);
 }
 
-export function searchJsonTree(data: any, query: string, currentPath: NodePath = []): SearchMatch[] {
-  if (!query || query.trim() === '') return [];
-
+export function searchJsonTree(data: any, query: string): SearchMatch[] {
   const matches: SearchMatch[] = [];
-  const q = query.toLowerCase().trim();
+  if (!query.trim()) return matches;
 
-  function walk(val: any, path: NodePath, keyName: string) {
-    const valType = getType(val);
-    const matchInKey = keyName.toLowerCase().includes(q);
+  const q = query.toLowerCase();
 
+  function walk(val: any, path: NodePath) {
+    if (val === undefined) return;
+
+    const currentKey = path.length > 0 ? String(path[path.length - 1]) : 'root';
+    const matchInKey = currentKey.toLowerCase().includes(q);
     let matchInValue = false;
-    if (valType === 'string' || valType === 'number' || valType === 'boolean') {
-      matchInValue = String(val).toLowerCase().includes(q);
+
+    const type = getType(val);
+
+    if (type !== 'object' && type !== 'array') {
+      const strVal = String(val).toLowerCase();
+      if (strVal.includes(q)) {
+        matchInValue = true;
+      }
     }
 
     if (matchInKey || matchInValue) {
       matches.push({
         path,
-        key: keyName || 'root',
+        key: currentKey,
         value: val,
-        type: valType,
+        type,
         matchInKey,
         matchInValue,
       });
     }
 
-    if (valType === 'object' && val !== null) {
-      for (const k of Object.keys(val)) {
-        walk(val[k], [...path, k], k);
-      }
-    } else if (valType === 'array') {
+    if (type === 'object' && val !== null) {
+      Object.keys(val).forEach(k => {
+        if (!isUnsafeKey(k)) walk(val[k], [...path, k]);
+      });
+    } else if (type === 'array') {
       val.forEach((item: any, idx: number) => {
-        walk(item, [...path, idx], String(idx));
+        walk(item, [...path, idx]);
       });
     }
   }
 
-  const rootType = getType(data);
-  if (rootType === 'object' && data !== null) {
-    for (const k of Object.keys(data)) {
-      walk(data[k], [k], k);
-    }
-  } else if (rootType === 'array') {
-    data.forEach((item: any, idx: number) => {
-      walk(item, [idx], String(idx));
-    });
-  } else {
-    walk(data, [], 'root');
-  }
-
+  walk(data, []);
   return matches;
 }

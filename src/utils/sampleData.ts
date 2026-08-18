@@ -1,4 +1,48 @@
 export const SAMPLE_DATASETS = {
+  textbook_db: {
+    project: "Interactive Physics & Science Textbook",
+    version: "2.4.0",
+    grade_level: "Grade 11",
+    author: "Dr. Evelyn Reed",
+    chapters: [
+      {
+        id: "ch_01",
+        title: "Kinematics and Dynamics",
+        pages: 45,
+        topics: ["Vector Mathematics", "Newtonian Laws", "Frictional Forces"],
+        questions: [
+          {
+            qid: "q_101",
+            type: "multiple_choice",
+            prompt: "What is the SI unit of force?",
+            options: ["Joule", "Newton", "Watt", "Pascal"],
+            answer: "Newton"
+          },
+          {
+            qid: "q_102",
+            type: "numerical",
+            prompt: "Calculate acceleration when m = 5kg and F = 20N (m/s^2)",
+            answer: 4.0
+          }
+        ]
+      },
+      {
+        id: "ch_02",
+        title: "Thermodynamics & Energy",
+        pages: 38,
+        topics: ["Heat Transfer", "Enthalpy", "Entropy"],
+        questions: [
+          {
+            qid: "q_201",
+            type: "true_false",
+            prompt: "Energy cannot be created or destroyed in an isolated system.",
+            answer: true
+          }
+        ]
+      }
+    ]
+  },
+
   demo_db: {
     project: "Firebase RTDB UltraConsole",
     status: "active",

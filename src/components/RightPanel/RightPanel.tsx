@@ -22,6 +22,7 @@ interface RightPanelProps {
   onUpdateValue: (path: NodePath, newValue: any) => void;
   onRenameKey: (parentPath: NodePath, oldKey: string, newKey: string) => void;
   onDeleteNode: (path: NodePath) => void;
+  onOpenValidator?: (initialContent?: string) => void;
 }
 
 export const RightPanel: React.FC<RightPanelProps> = ({
@@ -31,6 +32,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   onUpdateValue,
   onRenameKey,
   onDeleteNode,
+  onOpenValidator,
 }) => {
   const [activeTab, setActiveTab] = useState<'add' | 'edit'>('add');
 
@@ -293,9 +295,20 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
               {/* Syntax Warning Banner */}
               {addDetected.isInvalidJsonSyntax && (
-                <div className="p-2 bg-rose-500/10 border border-rose-500/30 rounded text-[11px] text-rose-300 flex items-start gap-1.5">
-                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
-                  <span>{addDetected.warningMessage}</span>
+                <div className="p-2 bg-rose-500/10 border border-rose-500/30 rounded text-[11px] text-rose-300 flex flex-col gap-1.5">
+                  <div className="flex items-start gap-1.5">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+                    <span>{addDetected.warningMessage}</span>
+                  </div>
+                  {onOpenValidator && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenValidator(addValueInput)}
+                      className="self-end px-2 py-0.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/40 rounded text-[10px] font-sans font-semibold transition"
+                    >
+                      🔍 Inspect & Fix Error on Site
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -389,9 +402,20 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               </div>
 
               {editDetected.isInvalidJsonSyntax && (
-                <div className="p-2 bg-rose-500/10 border border-rose-500/30 rounded text-[11px] text-rose-300 flex items-start gap-1.5">
-                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
-                  <span>{editDetected.warningMessage}</span>
+                <div className="p-2 bg-rose-500/10 border border-rose-500/30 rounded text-[11px] text-rose-300 flex flex-col gap-1.5">
+                  <div className="flex items-start gap-1.5">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+                    <span>{editDetected.warningMessage}</span>
+                  </div>
+                  {onOpenValidator && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenValidator(editValueInput)}
+                      className="self-end px-2 py-0.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/40 rounded text-[10px] font-sans font-semibold transition"
+                    >
+                      🔍 Inspect & Fix Error on Site
+                    </button>
+                  )}
                 </div>
               )}
             </div>

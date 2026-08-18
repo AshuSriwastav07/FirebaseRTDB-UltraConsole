@@ -7,6 +7,7 @@ import { TreeViewContainer } from './components/TreeView/TreeViewContainer';
 import { RightPanel } from './components/RightPanel/RightPanel';
 import { RawJsonModal } from './components/Modals/RawJsonModal';
 import { FirebaseConfigModal } from './components/Modals/FirebaseConfigModal';
+import { JsonValidatorModal } from './components/Modals/JsonValidatorModal';
 import { getValueByPath } from './utils/jsonOperations';
 import { FirebaseConfig, AppMode } from './types/json';
 import { Flame, ShieldAlert, ShieldCheck } from 'lucide-react';
@@ -44,6 +45,9 @@ export const App: React.FC = () => {
 
   const [isRawJsonModalOpen, setIsRawJsonModalOpen] = useState(false);
   const [isFirebaseConfigModalOpen, setIsFirebaseConfigModalOpen] = useState(false);
+  const [isValidatorModalOpen, setIsValidatorModalOpen] = useState(false);
+  const [validatorContent, setValidatorContent] = useState('');
+  const [validatorFileName, setValidatorFileName] = useState('');
 
   // 100% Transient In-Memory Firebase Credentials State (Never saved to localStorage or disk)
   const [firebaseConfig, setFirebaseConfig] = useState<FirebaseConfig | null>(null);
@@ -163,6 +167,21 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleOpenValidator = (content?: string, customFileName?: string) => {
+    if (content !== undefined) {
+      setValidatorContent(content);
+      setValidatorFileName(customFileName || 'invalid_data.json');
+    } else {
+      setValidatorContent(JSON.stringify(activeData, null, 2));
+      setValidatorFileName(fileName || 'current_database.json');
+    }
+    setIsValidatorModalOpen(true);
+  };
+
+  const handleApplyValidatedJson = (repairedData: any, newFileName?: string) => {
+    handleImportJson(repairedData, newFileName || fileName || 'fixed_data.json');
+  };
+
   const selectedNodeValue = getValueByPath(activeData, selectedPath);
 
   return (
@@ -189,6 +208,7 @@ export const App: React.FC = () => {
         onExpandToLevel={expandToLevel}
         onOpenRawJsonModal={() => setIsRawJsonModalOpen(true)}
         onOpenFirebaseConfigModal={() => setIsFirebaseConfigModalOpen(true)}
+        onOpenValidator={handleOpenValidator}
         onLoadSample={loadSampleDataset}
         onSelectMode={handleSelectMode}
         onPushToFirebase={handlePushToFirebase}
@@ -265,6 +285,7 @@ export const App: React.FC = () => {
           onUpdateValue={handleUpdateValue}
           onRenameKey={handleRenameKey}
           onDeleteNode={handleDeleteNode}
+          onOpenValidator={handleOpenValidator}
         />
       </div>
 
@@ -274,6 +295,17 @@ export const App: React.FC = () => {
         data={activeData}
         fileName={fileName}
         onClose={() => setIsRawJsonModalOpen(false)}
+        onOpenValidator={() => handleOpenValidator()}
+      />
+
+      {/* JSON Validator & Error Fixer Modal */}
+      <JsonValidatorModal
+        isOpen={isValidatorModalOpen}
+        initialContent={validatorContent}
+        initialFileName={validatorFileName}
+        currentAppData={activeData}
+        onApplyToApp={handleApplyValidatedJson}
+        onClose={() => setIsValidatorModalOpen(false)}
       />
 
       {/* Firebase Config Credentials Modal */}

@@ -6,6 +6,7 @@ interface RawJsonModalProps {
   data: any;
   fileName: string;
   onClose: () => void;
+  onOpenValidator?: () => void;
 }
 
 export const RawJsonModal: React.FC<RawJsonModalProps> = ({
@@ -13,6 +14,7 @@ export const RawJsonModal: React.FC<RawJsonModalProps> = ({
   data,
   fileName,
   onClose,
+  onOpenValidator,
 }) => {
   const [copied, setCopied] = useState(false);
   const [isCompact, setIsCompact] = useState(false);
@@ -41,6 +43,20 @@ export const RawJsonModal: React.FC<RawJsonModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {onOpenValidator && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onOpenValidator();
+                }}
+                className="flex items-center gap-1 px-2.5 py-1 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 rounded text-xs font-semibold transition font-sans"
+                title="Open in JSON Validator & Fixer"
+              >
+                <Code className="w-3.5 h-3.5" />
+                <span>Check & Fix Errors</span>
+              </button>
+            )}
+
             <button
               onClick={() => setIsCompact(!isCompact)}
               className="flex items-center gap-1 px-2.5 py-1 bg-firebase-card hover:bg-firebase-hover text-slate-300 border border-firebase-border rounded text-xs transition font-sans"

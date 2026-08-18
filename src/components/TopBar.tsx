@@ -41,6 +41,7 @@ interface TopBarProps {
   onExpandToLevel: (level: number) => void;
   onOpenRawJsonModal: () => void;
   onOpenFirebaseConfigModal: () => void;
+  onOpenValidator: (initialContent?: string, fileName?: string) => void;
   onLoadSample: (key: keyof typeof SAMPLE_DATASETS) => void;
   onSelectMode: (mode: AppMode) => void;
   onPushToFirebase?: () => void;
@@ -67,6 +68,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onExpandToLevel,
   onOpenRawJsonModal,
   onOpenFirebaseConfigModal,
+  onOpenValidator,
   onLoadSample,
   onSelectMode,
   onPushToFirebase,
@@ -79,11 +81,13 @@ export const TopBar: React.FC<TopBarProps> = ({
 
     const reader = new FileReader();
     reader.onload = (event) => {
+      const rawText = (event.target?.result as string) || '';
       try {
-        const parsed = JSON.parse(event.target?.result as string);
+        const parsed = JSON.parse(rawText);
         onImportJson(parsed, file.name);
-      } catch (err: any) {
-        alert('Invalid JSON File: ' + err.message);
+      } catch {
+        // Automatically open the JSON validator with the file preloaded to inspect and fix the error!
+        onOpenValidator(rawText, file.name);
       }
     };
     reader.readAsText(file);
@@ -103,8 +107,12 @@ export const TopBar: React.FC<TopBarProps> = ({
         });
         const file = await handle.getFile();
         const text = await file.text();
-        const parsed = JSON.parse(text);
-        onImportJson(parsed, file.name, handle);
+        try {
+          const parsed = JSON.parse(text);
+          onImportJson(parsed, file.name, handle);
+        } catch {
+          onOpenValidator(text, file.name);
+        }
         return;
       } catch (err: any) {
         if (err.name === 'AbortError') return;
@@ -382,6 +390,16 @@ export const TopBar: React.FC<TopBarProps> = ({
         >
           <Download className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">Export</span>
+        </button>
+
+        {/* JSON Validator / Error Fixer */}
+        <button
+          onClick={() => onOpenValidator()}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/35 rounded-md text-xs font-semibold transition shadow-sm"
+          title="Check & Find Errors in JSON (Validator, Pinpoint & Auto-Fix)"
+        >
+          <FileCode className="w-3.5 h-3.5 text-purple-400" />
+          <span>Check JSON</span>
         </button>
 
         {/* Raw JSON View */}

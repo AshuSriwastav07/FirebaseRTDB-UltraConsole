@@ -9,6 +9,7 @@ interface Props {
   isBackingUp: boolean;
   errorMsg: string | null;
   backupAttempted: boolean;
+  isExternalChangeDetected?: boolean;
   onConfirmWithBackup: () => void;
   onConfirmWithoutBackup: () => void;
   onCancel: () => void;
@@ -39,6 +40,7 @@ export const BackupConfirmModal: React.FC<Props> = ({
   isBackingUp,
   errorMsg,
   backupAttempted,
+  isExternalChangeDetected = false,
   onConfirmWithBackup,
   onConfirmWithoutBackup,
   onCancel
@@ -86,6 +88,19 @@ export const BackupConfirmModal: React.FC<Props> = ({
               </div>
             )}
           </div>
+
+          {/* External Change Warning */}
+          {isExternalChangeDetected && (
+            <div className="bg-amber-500/15 border border-amber-500/40 rounded-lg p-3 text-xs text-amber-200 space-y-1">
+              <div className="font-bold flex items-center gap-1.5 text-amber-300">
+                <ShieldAlert className="w-4 h-4 text-amber-400" />
+                <span>External Changes Detected</span>
+              </div>
+              <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                Live data has changed since you loaded it. Pushing now will overwrite those external changes too.
+              </p>
+            </div>
+          )}
 
           {/* Backup Progress */}
           {(isBackingUp || backupAttempted) && (

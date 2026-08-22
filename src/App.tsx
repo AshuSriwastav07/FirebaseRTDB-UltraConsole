@@ -29,6 +29,7 @@ export const App: React.FC = () => {
     searchQuery,
     searchResults,
     hasUnsavedChanges,
+    pendingChangesCount,
     appMode,
     setAppMode,
     setSearchQuery,
@@ -38,6 +39,8 @@ export const App: React.FC = () => {
     collapseAllPaths,
     expandToLevel,
     importJsonData,
+    loadLiveSnapshot,
+    resetPendingChanges,
     loadSampleDataset,
     updateValueAtPath,
     deleteNodeAtPath,
@@ -97,8 +100,8 @@ export const App: React.FC = () => {
     liveData,
     isConnected: isFirebaseConnected,
     error: firebaseError,
-    firebaseSetByPath,
-    firebaseDeleteByPath,
+    isExternalChangeDetected,
+    clearExternalChange,
     pushWholeDataToFirebase,
   } = useFirebaseRtdb(firebaseConfig, appMode === 'firebase');
 
@@ -106,18 +109,33 @@ export const App: React.FC = () => {
   const supabaseBackup = useSupabaseBackup(supabaseConfig);
   const backupSystem = useBackupSystem(db, supabaseBackup, historyBackup);
 
-  // Active data choice with safe fallback to local data (never null or undefined)
-  const activeData = (appMode === 'firebase' && isFirebaseConnected && liveData !== null)
-    ? liveData
-    : (data || {});
+  // On initial connection to Firebase, load live data into local editor tree only if live DB has data
+  const hasLoadedLiveInitiallyRef = React.useRef(false);
+  useEffect(() => {
+    if (isFirebaseConnected && liveData !== null && !hasLoadedLiveInitiallyRef.current) {
+      const isLiveHasData = liveData && typeof liveData === 'object' && Object.keys(liveData).length > 0;
+      if (isLiveHasData) {
+        loadLiveSnapshot(liveData, 'live_rtdb.json');
+      }
+      hasLoadedLiveInitiallyRef.current = true;
+    }
+    if (!isFirebaseConnected) {
+      hasLoadedLiveInitiallyRef.current = false;
+    }
+  }, [isFirebaseConnected, liveData, loadLiveSnapshot]);
+
+  // Active data is always the local in-memory tree state
+  const activeData = data || {};
 
   const handleSaveFirebaseConfig = (cfg: FirebaseConfig) => {
     setFirebaseConfig(cfg);
+    hasLoadedLiveInitiallyRef.current = false;
   };
 
   const handlePurgeCredentials = () => {
     setFirebaseConfig(null);
     setAppMode('local');
+    hasLoadedLiveInitiallyRef.current = false;
   };
 
   const handleSelectMode = (mode: AppMode) => {
@@ -129,82 +147,42 @@ export const App: React.FC = () => {
     }
   };
 
+  // Single explicit batched Push to Database action
   const handlePushToFirebase = async () => {
     if (!isFirebaseConnected) {
       setIsSettingsModalOpen(true);
       return;
     }
     
-    // We explicitly push activeData so the user pushes exactly what they see on screen.
     backupSystem.executeBackupAndWrite('root_push', null, async () => {
       const res = await pushWholeDataToFirebase(activeData);
       if (res?.success) {
-        alert('Successfully pushed the currently visible JSON data to the Live Firebase Database!');
+        resetPendingChanges();
+        clearExternalChange();
+        alert('Successfully pushed changes to Live Firebase Database!');
       }
     });
   };
 
-  // Sync edits if in live firebase mode
+  // 100% Free & Fast Local In-Memory Editing (No per-node live writes or modal gating)
   const handleAddChild = (path: any, key: string, value: any) => {
     addChildNode(path, key, value);
-    if (appMode === 'firebase' && isFirebaseConnected) {
-      const target = getValueByPath(activeData, path);
-      let newTarget: any;
-      if (Array.isArray(target)) {
-        newTarget = [...target, value];
-      } else if (typeof target === 'object' && target !== null) {
-        newTarget = { ...target, [key]: value };
-      } else {
-        newTarget = { [key]: value };
-      }
-      
-      const strPath = path.length ? path.join('/') : null;
-      backupSystem.executeBackupAndWrite('node_add', strPath, () => firebaseSetByPath(path, newTarget));
-    }
   };
 
   const handleUpdateValue = (path: any, newValue: any) => {
     updateValueAtPath(path, newValue);
-    if (appMode === 'firebase' && isFirebaseConnected) {
-      const strPath = path.length ? path.join('/') : null;
-      backupSystem.executeBackupAndWrite('node_edit', strPath, () => firebaseSetByPath(path, newValue));
-    }
   };
 
   const handleRenameKey = (parentPath: any, oldKey: string, newKey: string) => {
     renameKey(parentPath, oldKey, newKey);
-    if (appMode === 'firebase' && isFirebaseConnected) {
-      const parentVal = getValueByPath(activeData, parentPath);
-      if (parentVal && typeof parentVal === 'object') {
-        const updated: any = {};
-        for (const k of Object.keys(parentVal)) {
-          if (k === oldKey) updated[newKey] = parentVal[oldKey];
-          else updated[k] = parentVal[k];
-        }
-        const strPath = parentPath.length ? parentPath.join('/') : null;
-        backupSystem.executeBackupAndWrite('node_edit', strPath, () => firebaseSetByPath(parentPath, updated));
-      }
-    }
   };
 
   const handleDeleteNode = (path: any) => {
     deleteNodeAtPath(path);
-    if (appMode === 'firebase' && isFirebaseConnected) {
-      const strPath = path.length ? path.join('/') : null;
-      backupSystem.executeBackupAndWrite('node_delete', strPath, () => firebaseDeleteByPath(path));
-    }
   };
 
   const handleImportJson = (newJsonData: any, newFileName: string, handle?: any) => {
     importJsonData(newJsonData, newFileName, handle);
-    if (appMode === 'firebase' && isFirebaseConnected) {
-      const confirmPush = window.confirm(
-        `Imported ${newFileName}. Would you like to push this new data directly into your Live Firebase Database?`
-      );
-      if (confirmPush) {
-        backupSystem.executeBackupAndWrite('root_push', null, async () => { await pushWholeDataToFirebase(newJsonData); });
-      }
-    }
   };
 
   const handleOpenValidator = (content?: string, customFileName?: string) => {
@@ -230,9 +208,11 @@ export const App: React.FC = () => {
       <TopBar
         fileName={fileName}
         hasUnsavedChanges={hasUnsavedChanges}
+        pendingChangesCount={pendingChangesCount}
         appMode={appMode}
         isFirebaseConnected={isFirebaseConnected}
         firebaseError={firebaseError}
+        isExternalChangeDetected={isExternalChangeDetected}
         searchQuery={searchQuery}
         searchResults={searchResults}
         undoStackLength={undoStack.length}
@@ -377,6 +357,7 @@ export const App: React.FC = () => {
         isBackingUp={backupSystem.isBackingUp}
         errorMsg={backupSystem.errorMsg}
         backupAttempted={backupSystem.backupAttempted}
+        isExternalChangeDetected={isExternalChangeDetected}
         onConfirmWithBackup={backupSystem.confirmWithBackup}
         onConfirmWithoutBackup={backupSystem.confirmWithoutBackup}
         onCancel={backupSystem.cancel}

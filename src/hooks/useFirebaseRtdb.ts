@@ -9,12 +9,15 @@ export function useFirebaseRtdb(config: FirebaseConfig | null, active: boolean) 
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [isExternalChangeDetected, setIsExternalChangeDetected] = useState<boolean>(false);
 
   // Initialize Firebase app & DB connection
   useEffect(() => {
     if (!active || !config || !config.databaseURL) {
       setDb(null);
       setIsConnected(false);
+      setLiveData(null);
+      setIsExternalChangeDetected(false);
       return;
     }
 
@@ -36,14 +39,23 @@ export function useFirebaseRtdb(config: FirebaseConfig | null, active: boolean) 
       const database = getDatabase(app, config.databaseURL);
       setDb(database);
 
+      let initialLoadDone = false;
       const rootRef = ref(database, '/');
       const unsubscribe = onValue(
         rootRef,
         (snapshot) => {
-          setLiveData(snapshot.val() || {});
+          const val = snapshot.val() || {};
+          setLiveData(val);
           setIsConnected(true);
           setLoading(false);
           setError(null);
+
+          if (!initialLoadDone) {
+            initialLoadDone = true;
+          } else {
+            // Subsequent external change notification
+            setIsExternalChangeDetected(true);
+          }
         },
         (err) => {
           console.error('Firebase RTDB Connection Error:', err);
@@ -68,40 +80,16 @@ export function useFirebaseRtdb(config: FirebaseConfig | null, active: boolean) 
     }
   }, [config, active]);
 
-  // Live write operations
-  const firebaseSetByPath = useCallback(async (path: NodePath, value: any) => {
-    if (!db) return;
-    try {
-      const dbPath = path.length === 0 ? '/' : '/' + path.join('/');
-      const nodeRef = ref(db, dbPath);
-      await set(nodeRef, value);
-    } catch (err: any) {
-      console.error('Firebase write error:', err);
-      alert('Firebase Write Failed: ' + (err.message || 'Check security rules or internet connection'));
-    }
-  }, [db]);
-
-  const firebaseDeleteByPath = useCallback(async (path: NodePath) => {
-    if (!db) return;
-    try {
-      if (path.length === 0) {
-        await set(ref(db, '/'), null);
-        return;
-      }
-      const dbPath = '/' + path.join('/');
-      const nodeRef = ref(db, dbPath);
-      await remove(nodeRef);
-    } catch (err: any) {
-      console.error('Firebase delete error:', err);
-      alert('Firebase Delete Failed: ' + (err.message || 'Check security rules'));
-    }
-  }, [db]);
+  const clearExternalChange = useCallback(() => {
+    setIsExternalChangeDetected(false);
+  }, []);
 
   const pushWholeDataToFirebase = useCallback(async (data: any) => {
-    if (!db) return;
+    if (!db) return { success: false, error: 'Database not initialized' };
     try {
       const rootRef = ref(db, '/');
       await set(rootRef, data);
+      setIsExternalChangeDetected(false);
       return { success: true };
     } catch (err: any) {
       console.error('Push to Firebase error:', err);
@@ -116,8 +104,8 @@ export function useFirebaseRtdb(config: FirebaseConfig | null, active: boolean) 
     isConnected,
     error,
     loading,
-    firebaseSetByPath,
-    firebaseDeleteByPath,
+    isExternalChangeDetected,
+    clearExternalChange,
     pushWholeDataToFirebase,
   };
 }

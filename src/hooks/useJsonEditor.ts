@@ -45,6 +45,7 @@ export function useJsonEditor() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [fileHandle, setFileHandle] = useState<any | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
+  const [pendingChangesCount, setPendingChangesCount] = useState<number>(0);
   const [appMode, setAppMode] = useState<AppMode>('local');
 
   // Warn user before refreshing or closing tab if they have data/unsaved changes in Local Mode
@@ -73,6 +74,7 @@ export function useJsonEditor() {
     setRedoStack([]);
     setData(newData);
     setHasUnsavedChanges(true);
+    setPendingChangesCount(prev => prev + 1);
   }, [data, selectedPath]);
 
   // Tree expansion utilities
@@ -149,6 +151,7 @@ export function useJsonEditor() {
     setUndoStack([]);
     setRedoStack([]);
     setHasUnsavedChanges(false);
+    setPendingChangesCount(prev => prev + 1);
 
     // Initial expand top level
     const initialSet = new Set<string>(['root']);
@@ -156,6 +159,28 @@ export function useJsonEditor() {
       Object.keys(newJsonData).slice(0, 10).forEach(k => initialSet.add(`root/${k}`));
     }
     setExpandedPaths(initialSet);
+  }, []);
+
+  const loadLiveSnapshot = useCallback((newJsonData: any, newFileName: string = 'live_rtdb.json') => {
+    setData(newJsonData);
+    setFileName(newFileName);
+    setFileHandle(null);
+    setSelectedPath([]);
+    setUndoStack([]);
+    setRedoStack([]);
+    setHasUnsavedChanges(false);
+    setPendingChangesCount(0);
+
+    const initialSet = new Set<string>(['root']);
+    if (newJsonData && typeof newJsonData === 'object') {
+      Object.keys(newJsonData).slice(0, 10).forEach(k => initialSet.add(`root/${k}`));
+    }
+    setExpandedPaths(initialSet);
+  }, []);
+
+  const resetPendingChanges = useCallback(() => {
+    setPendingChangesCount(0);
+    setHasUnsavedChanges(false);
   }, []);
 
   const loadSampleDataset = useCallback((sampleKey: keyof typeof SAMPLE_DATASETS) => {
@@ -211,6 +236,7 @@ export function useJsonEditor() {
     setData(last.data);
     setSelectedPath(last.selectedPath);
     setHasUnsavedChanges(true);
+    setPendingChangesCount(prev => prev + 1);
   }, [undoStack, data, selectedPath]);
 
   const redo = useCallback(() => {
@@ -221,6 +247,7 @@ export function useJsonEditor() {
     setData(next.data);
     setSelectedPath(next.selectedPath);
     setHasUnsavedChanges(true);
+    setPendingChangesCount(prev => prev + 1);
   }, [redoStack, data, selectedPath]);
 
   // Search execution
@@ -278,6 +305,7 @@ export function useJsonEditor() {
     searchQuery,
     searchResults,
     hasUnsavedChanges,
+    pendingChangesCount,
     appMode,
     setAppMode,
     setSearchQuery,
@@ -287,6 +315,8 @@ export function useJsonEditor() {
     collapseAllPaths,
     expandToLevel,
     importJsonData,
+    loadLiveSnapshot,
+    resetPendingChanges,
     loadSampleDataset,
     updateValueAtPath,
     deleteNodeAtPath,

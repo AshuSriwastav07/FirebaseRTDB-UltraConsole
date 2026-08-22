@@ -25,7 +25,7 @@ export function useSupabaseBackup(config: SupabaseConfig | null) {
     }
   }, [config]);
 
-  // Enforces the "insert-only" rule
+  // Enforces the "insert & auto-prune-to-3" rule
   const insertBackup = useCallback(async (snapshot: BackupSnapshot) => {
     if (!supabase) {
       throw new Error('Supabase client not initialized or credentials missing.');
@@ -45,6 +45,16 @@ export function useSupabaseBackup(config: SupabaseConfig | null) {
     
     if (error) {
       throw new Error(`Supabase insert failed: ${error.message}`);
+    }
+
+    // Immediately trigger auto-prune to keep only the 3 most recent backups
+    try {
+      const { error: pruneError } = await supabase.rpc('prune_backups_keep_latest', { keep_count: 3 });
+      if (pruneError) {
+        console.warn('Supabase auto-prune RPC warning (ensure SQL function is created):', pruneError.message);
+      }
+    } catch (err) {
+      console.warn('Failed to execute prune_backups_keep_latest RPC:', err);
     }
   }, [supabase]);
 

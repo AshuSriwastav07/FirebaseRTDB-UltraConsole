@@ -23,9 +23,11 @@ import { SAMPLE_DATASETS } from '../utils/sampleData';
 interface TopBarProps {
   fileName: string;
   hasUnsavedChanges: boolean;
+  pendingChangesCount: number;
   appMode: AppMode;
   isFirebaseConnected?: boolean;
   firebaseError?: string | null;
+  isExternalChangeDetected?: boolean;
   searchQuery: string;
   searchResults: SearchMatch[];
   undoStackLength: number;
@@ -51,9 +53,11 @@ interface TopBarProps {
 export const TopBar: React.FC<TopBarProps> = ({
   fileName,
   hasUnsavedChanges,
+  pendingChangesCount,
   appMode,
   isFirebaseConnected = false,
   firebaseError = null,
+  isExternalChangeDetected = false,
   searchQuery,
   searchResults,
   undoStackLength,
@@ -215,14 +219,28 @@ export const TopBar: React.FC<TopBarProps> = ({
             </button>
           </div>
         )}
+
+        {isExternalChangeDetected && appMode === 'firebase' && (
+          <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/20 border border-amber-500/40 text-[11px] text-amber-300 font-medium">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+            <span>Live DB changed externally</span>
+          </div>
+        )}
+
         {onPushToFirebase && isFirebaseConnected && (
           <button
             onClick={onPushToFirebase}
-            className="px-2.5 py-1.5 rounded-md bg-emerald-500 text-slate-950 text-xs font-bold hover:bg-emerald-400 transition shadow-md flex items-center gap-1"
-            title="Push current JSON tree directly into live Firebase Database root"
+            className={`px-3 py-1.5 rounded-md text-xs font-bold transition shadow-md flex items-center gap-1.5 ${
+              pendingChangesCount > 0
+                ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 ring-2 ring-emerald-400/40'
+                : 'bg-firebase-card hover:bg-firebase-hover text-slate-300 border border-firebase-border'
+            }`}
+            title="Push current local JSON tree to Live Firebase Database root"
           >
-            <Flame className="w-3.5 h-3.5 fill-slate-950" />
-            <span>Push to Live DB</span>
+            <Flame className={`w-3.5 h-3.5 ${pendingChangesCount > 0 ? 'fill-slate-950 text-slate-950' : 'text-amber-400'}`} />
+            <span>
+              Push to Database {pendingChangesCount > 0 ? `(${pendingChangesCount} pending)` : ''}
+            </span>
           </button>
         )}
       </div>

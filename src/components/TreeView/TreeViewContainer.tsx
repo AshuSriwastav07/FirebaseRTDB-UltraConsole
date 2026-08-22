@@ -103,11 +103,23 @@ export const TreeViewContainer: React.FC<TreeViewContainerProps> = ({
 
       {/* Tree Content Area */}
       <div className="flex-1 overflow-auto p-2 scrollbar-thin scrollbar-thumb-firebase-border">
-        {data === undefined || data === null ? (
-          <div className="flex flex-col items-center justify-center h-full text-slate-500 text-xs font-mono gap-2 p-6 text-center">
-            <FileCode className="w-8 h-8 text-slate-600" />
-            <span>No JSON data loaded yet.</span>
-            <span className="text-[11px]">Import a .json file or pick a Sample DB from top bar.</span>
+        {data === undefined || data === null || (rootType === 'object' && rootChildCount === 0) ? (
+          <div className="flex flex-col items-center justify-center h-full text-slate-400 text-xs font-mono gap-3 p-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-firebase-card flex items-center justify-center border border-firebase-border">
+              <Database className="w-6 h-6 text-amber-400" />
+            </div>
+            <div className="space-y-1">
+              <p className="font-semibold text-slate-200 text-sm">Database is currently empty</p>
+              <p className="text-[11px] text-slate-500 max-w-xs">
+                Add keys and values using the panel on the right, or import a JSON file.
+              </p>
+            </div>
+            <button
+              onClick={() => onSelectNode([])}
+              className="px-4 py-2 bg-firebase-blue hover:bg-sky-400 text-slate-950 font-bold rounded-lg transition text-xs shadow-md"
+            >
+              + Add First Key / Node
+            </button>
           </div>
         ) : (
           <TreeNode

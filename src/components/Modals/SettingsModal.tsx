@@ -130,8 +130,11 @@ VITE_SUPABASE_ANON_KEY="..."`}
                 {errorMsg}
               </div>
             )}
-            <div className="bg-amber-500/10 border border-amber-500/20 rounded p-3 text-[10px] text-amber-300">
-              Note: You must create a Postgres <strong>Database Table</strong> named <code className="bg-amber-500/20 px-1 rounded">rtdb_backups</code> in your Supabase project.
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-[11px] text-amber-300 space-y-1.5 font-sans">
+              <div className="font-semibold text-amber-200">Supabase SQL Setup (Table & 3-Backup Auto-Retention):</div>
+              <p className="text-[10px] text-amber-300/90 leading-relaxed font-mono">
+                Create table <code className="bg-amber-500/20 px-1 rounded">rtdb_backups</code> and function <code className="bg-amber-500/20 px-1 rounded">prune_backups_keep_latest(3)</code> in your Supabase SQL Editor.
+              </p>
             </div>
           </div>
 

@@ -40,7 +40,8 @@ interface TopBarProps {
   onCollapseAll: () => void;
   onExpandToLevel: (level: number) => void;
   onOpenRawJsonModal: () => void;
-  onOpenFirebaseConfigModal: () => void;
+  onOpenSettingsModal: () => void;
+  onOpenBackupHistory: () => void;
   onOpenValidator: (initialContent?: string, fileName?: string) => void;
   onLoadSample: (key: keyof typeof SAMPLE_DATASETS) => void;
   onSelectMode: (mode: AppMode) => void;
@@ -67,7 +68,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   onCollapseAll,
   onExpandToLevel,
   onOpenRawJsonModal,
-  onOpenFirebaseConfigModal,
+  onOpenSettingsModal,
+  onOpenBackupHistory,
   onOpenValidator,
   onLoadSample,
   onSelectMode,
@@ -204,24 +206,24 @@ export const TopBar: React.FC<TopBarProps> = ({
         {appMode === 'firebase' && (
           <div className="flex items-center gap-1.5">
             <button
-              onClick={onOpenFirebaseConfigModal}
-              className="px-2.5 py-1.5 rounded-md bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-semibold transition"
-              title="Configure Firebase RTDB Database URL & Credentials"
+              onClick={onOpenSettingsModal}
+              className="px-2.5 py-1.5 rounded-md bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-semibold transition flex items-center gap-1.5"
+              title="Configure Database & Backup Settings"
             >
-              RTDB Credentials
+              <Database className="w-3.5 h-3.5" />
+              Settings
             </button>
-
-            {onPushToFirebase && isFirebaseConnected && (
-              <button
-                onClick={onPushToFirebase}
-                className="px-2.5 py-1.5 rounded-md bg-emerald-500 text-slate-950 text-xs font-bold hover:bg-emerald-400 transition shadow-md flex items-center gap-1"
-                title="Push current JSON tree directly into live Firebase Database root"
-              >
-                <Flame className="w-3.5 h-3.5 fill-slate-950" />
-                <span>Push to Live DB</span>
-              </button>
-            )}
           </div>
+        )}
+        {onPushToFirebase && isFirebaseConnected && (
+          <button
+            onClick={onPushToFirebase}
+            className="px-2.5 py-1.5 rounded-md bg-emerald-500 text-slate-950 text-xs font-bold hover:bg-emerald-400 transition shadow-md flex items-center gap-1"
+            title="Push current JSON tree directly into live Firebase Database root"
+          >
+            <Flame className="w-3.5 h-3.5 fill-slate-950" />
+            <span>Push to Live DB</span>
+          </button>
         )}
       </div>
 
@@ -359,6 +361,14 @@ export const TopBar: React.FC<TopBarProps> = ({
             title="Redo (Ctrl+Y)"
           >
             <Redo2 className="w-3.5 h-3.5" />
+          </button>
+          <div className="w-px h-4 bg-firebase-border mx-1"></div>
+          <button
+            onClick={onOpenBackupHistory}
+            className="p-1 text-slate-400 hover:text-white hover:bg-firebase-hover rounded transition flex items-center gap-1"
+            title="View Backup History Log"
+          >
+            <HardDrive className="w-3.5 h-3.5" />
           </button>
         </div>
 

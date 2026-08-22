@@ -40,7 +40,7 @@ export function useFirebaseRtdb(config: FirebaseConfig | null, active: boolean) 
       const unsubscribe = onValue(
         rootRef,
         (snapshot) => {
-          setLiveData(snapshot.val());
+          setLiveData(snapshot.val() || {});
           setIsConnected(true);
           setLoading(false);
           setError(null);

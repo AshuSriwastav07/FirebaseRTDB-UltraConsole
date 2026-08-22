@@ -6,10 +6,16 @@ import { Breadcrumb } from './components/Breadcrumb';
 import { TreeViewContainer } from './components/TreeView/TreeViewContainer';
 import { RightPanel } from './components/RightPanel/RightPanel';
 import { RawJsonModal } from './components/Modals/RawJsonModal';
-import { FirebaseConfigModal } from './components/Modals/FirebaseConfigModal';
 import { JsonValidatorModal } from './components/Modals/JsonValidatorModal';
+import { BackupConfirmModal } from './components/Modals/BackupConfirmModal';
+import { SettingsModal } from './components/Modals/SettingsModal';
+import { BackupHistoryPanel } from './components/BackupHistoryPanel';
 import { getValueByPath } from './utils/jsonOperations';
 import { FirebaseConfig, AppMode } from './types/json';
+import { SupabaseConfig } from './types/backup';
+import { useBackupSystem } from './hooks/useBackupSystem';
+import { useBackupHistory } from './hooks/useBackupHistory';
+import { useSupabaseBackup } from './hooks/useSupabaseBackup';
 import { Flame, ShieldAlert, ShieldCheck } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -44,24 +50,50 @@ export const App: React.FC = () => {
   } = useJsonEditor();
 
   const [isRawJsonModalOpen, setIsRawJsonModalOpen] = useState(false);
-  const [isFirebaseConfigModalOpen, setIsFirebaseConfigModalOpen] = useState(false);
   const [isValidatorModalOpen, setIsValidatorModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isBackupHistoryOpen, setIsBackupHistoryOpen] = useState(false);
   const [validatorContent, setValidatorContent] = useState('');
   const [validatorFileName, setValidatorFileName] = useState('');
 
   // 100% Transient In-Memory Firebase Credentials State (Never saved to localStorage or disk)
   const [firebaseConfig, setFirebaseConfig] = useState<FirebaseConfig | null>(null);
+  const [supabaseConfig, setSupabaseConfig] = useState<SupabaseConfig | null>(null);
 
-  // Purge any legacy localStorage config items on mount
+  // Auto-load from .env and purge legacy config on mount
   useEffect(() => {
     try {
       localStorage.removeItem('firebase_rtdb_config');
-    } catch {
-      // ignore
+    } catch {}
+
+    const env = (import.meta as any).env;
+    
+    // Auto-load Firebase
+    const fbDbUrl = env.VITE_FIREBASE_DATABASE_URL;
+    if (fbDbUrl) {
+      setFirebaseConfig({
+        apiKey: env.VITE_FIREBASE_API_KEY || '',
+        authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || '',
+        databaseURL: fbDbUrl,
+        projectId: env.VITE_FIREBASE_PROJECT_ID || '',
+        storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || '',
+        messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
+        appId: env.VITE_FIREBASE_APP_ID || ''
+      });
+      // Auto-switch to live mode if credentials are provided in env
+      setAppMode('firebase');
+    }
+
+    // Auto-load Supabase
+    const sbUrl = env.VITE_SUPABASE_URL;
+    const sbKey = env.VITE_SUPABASE_ANON_KEY;
+    if (sbUrl && sbKey) {
+      setSupabaseConfig({ url: sbUrl, anonKey: sbKey });
     }
   }, []);
 
   const {
+    db,
     liveData,
     isConnected: isFirebaseConnected,
     error: firebaseError,
@@ -69,6 +101,10 @@ export const App: React.FC = () => {
     firebaseDeleteByPath,
     pushWholeDataToFirebase,
   } = useFirebaseRtdb(firebaseConfig, appMode === 'firebase');
+
+  const historyBackup = useBackupHistory();
+  const supabaseBackup = useSupabaseBackup(supabaseConfig);
+  const backupSystem = useBackupSystem(db, supabaseBackup, historyBackup);
 
   // Active data choice with safe fallback to local data (never null or undefined)
   const activeData = (appMode === 'firebase' && isFirebaseConnected && liveData !== null)
@@ -88,25 +124,24 @@ export const App: React.FC = () => {
     setAppMode(mode);
     if (mode === 'firebase') {
       if (!firebaseConfig || !firebaseConfig.databaseURL) {
-        setIsFirebaseConfigModalOpen(true);
+        setIsSettingsModalOpen(true);
       }
     }
   };
 
   const handlePushToFirebase = async () => {
     if (!isFirebaseConnected) {
-      setIsFirebaseConfigModalOpen(true);
+      setIsSettingsModalOpen(true);
       return;
     }
-    const confirmPush = window.confirm(
-      `Push current local JSON data (${fileName}) to your live Firebase Database? This will update the database root.`
-    );
-    if (!confirmPush) return;
-
-    const res = await pushWholeDataToFirebase(data);
-    if (res?.success) {
-      alert('Successfully pushed local JSON data to Live Firebase Database!');
-    }
+    
+    // We explicitly push activeData so the user pushes exactly what they see on screen.
+    backupSystem.executeBackupAndWrite('root_push', null, async () => {
+      const res = await pushWholeDataToFirebase(activeData);
+      if (res?.success) {
+        alert('Successfully pushed the currently visible JSON data to the Live Firebase Database!');
+      }
+    });
   };
 
   // Sync edits if in live firebase mode
@@ -122,14 +157,17 @@ export const App: React.FC = () => {
       } else {
         newTarget = { [key]: value };
       }
-      firebaseSetByPath(path, newTarget);
+      
+      const strPath = path.length ? path.join('/') : null;
+      backupSystem.executeBackupAndWrite('node_add', strPath, () => firebaseSetByPath(path, newTarget));
     }
   };
 
   const handleUpdateValue = (path: any, newValue: any) => {
     updateValueAtPath(path, newValue);
     if (appMode === 'firebase' && isFirebaseConnected) {
-      firebaseSetByPath(path, newValue);
+      const strPath = path.length ? path.join('/') : null;
+      backupSystem.executeBackupAndWrite('node_edit', strPath, () => firebaseSetByPath(path, newValue));
     }
   };
 
@@ -143,7 +181,8 @@ export const App: React.FC = () => {
           if (k === oldKey) updated[newKey] = parentVal[oldKey];
           else updated[k] = parentVal[k];
         }
-        firebaseSetByPath(parentPath, updated);
+        const strPath = parentPath.length ? parentPath.join('/') : null;
+        backupSystem.executeBackupAndWrite('node_edit', strPath, () => firebaseSetByPath(parentPath, updated));
       }
     }
   };
@@ -151,7 +190,8 @@ export const App: React.FC = () => {
   const handleDeleteNode = (path: any) => {
     deleteNodeAtPath(path);
     if (appMode === 'firebase' && isFirebaseConnected) {
-      firebaseDeleteByPath(path);
+      const strPath = path.length ? path.join('/') : null;
+      backupSystem.executeBackupAndWrite('node_delete', strPath, () => firebaseDeleteByPath(path));
     }
   };
 
@@ -162,7 +202,7 @@ export const App: React.FC = () => {
         `Imported ${newFileName}. Would you like to push this new data directly into your Live Firebase Database?`
       );
       if (confirmPush) {
-        pushWholeDataToFirebase(newJsonData);
+        backupSystem.executeBackupAndWrite('root_push', null, async () => { await pushWholeDataToFirebase(newJsonData); });
       }
     }
   };
@@ -207,7 +247,8 @@ export const App: React.FC = () => {
         onCollapseAll={collapseAllPaths}
         onExpandToLevel={expandToLevel}
         onOpenRawJsonModal={() => setIsRawJsonModalOpen(true)}
-        onOpenFirebaseConfigModal={() => setIsFirebaseConfigModalOpen(true)}
+        onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
+        onOpenBackupHistory={() => setIsBackupHistoryOpen(true)}
         onOpenValidator={handleOpenValidator}
         onLoadSample={loadSampleDataset}
         onSelectMode={handleSelectMode}
@@ -225,7 +266,7 @@ export const App: React.FC = () => {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setIsFirebaseConfigModalOpen(true)}
+              onClick={() => setIsSettingsModalOpen(true)}
               className="px-3 py-1 bg-amber-500 text-slate-950 font-bold rounded hover:bg-amber-400 transition text-xs shadow"
             >
               Enter Firebase Database Credentials
@@ -308,13 +349,37 @@ export const App: React.FC = () => {
         onClose={() => setIsValidatorModalOpen(false)}
       />
 
-      {/* Firebase Config Credentials Modal */}
-      <FirebaseConfigModal
-        isOpen={isFirebaseConfigModalOpen}
-        config={firebaseConfig}
-        onSave={handleSaveFirebaseConfig}
-        onClose={() => setIsFirebaseConfigModalOpen(false)}
+      {/* Consolidated Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        onSaveFirebase={handleSaveFirebaseConfig}
+        onSaveSupabase={setSupabaseConfig}
         onPurgeCredentials={handlePurgeCredentials}
+      />
+
+      {/* Backup History Panel */}
+      <BackupHistoryPanel
+        isOpen={isBackupHistoryOpen}
+        onClose={() => setIsBackupHistoryOpen(false)}
+        historyBackup={historyBackup}
+        supabaseBackup={supabaseBackup}
+        onRestore={(snapshot) => {
+          backupSystem.executeBackupAndWrite('restore', null, async () => { await pushWholeDataToFirebase(snapshot.data); });
+        }}
+      />
+
+      {/* Backup Confirmation Gate Modal */}
+      <BackupConfirmModal
+        isOpen={backupSystem.isModalOpen}
+        pendingWrite={backupSystem.pendingWrite}
+        status={backupSystem.status}
+        isBackingUp={backupSystem.isBackingUp}
+        errorMsg={backupSystem.errorMsg}
+        backupAttempted={backupSystem.backupAttempted}
+        onConfirmWithBackup={backupSystem.confirmWithBackup}
+        onConfirmWithoutBackup={backupSystem.confirmWithoutBackup}
+        onCancel={backupSystem.cancel}
       />
     </div>
   );

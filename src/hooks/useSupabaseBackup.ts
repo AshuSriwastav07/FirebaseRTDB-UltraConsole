@@ -41,10 +41,32 @@ export function useSupabaseBackup(config: SupabaseConfig | null) {
       data: snapshot.data
     };
 
+    let insertError: any = null;
+
+    // First attempt
     const { error } = await supabase.from('rtdb_backups').insert([row]);
-    
     if (error) {
-      throw new Error(`Supabase insert failed: ${error.message}`);
+      insertError = error;
+      // If statement timeout or network error, attempt one immediate retry (e.g. project waking up)
+      if (error.message?.includes('timeout') || error.message?.includes('statement timeout')) {
+        console.warn('Supabase insert timed out. Retrying once...');
+        const retryRes = await supabase.from('rtdb_backups').insert([row]);
+        if (!retryRes.error) {
+          insertError = null;
+        } else {
+          insertError = retryRes.error;
+        }
+      }
+    }
+    
+    if (insertError) {
+      let msg = insertError.message || 'Unknown Supabase error';
+      if (msg.includes('statement timeout')) {
+        msg = 'Supabase statement timeout: The database took too long to respond. If your Supabase project was paused or is waking up, please retry in a few seconds.';
+      } else if (msg.includes('relation "rtdb_backups" does not exist')) {
+        msg = 'Table "rtdb_backups" does not exist in Supabase. Please run the SQL setup script to create the table.';
+      }
+      throw new Error(`Supabase backup error: ${msg}`);
     }
 
     // Immediately trigger auto-prune to keep only the 3 most recent backups

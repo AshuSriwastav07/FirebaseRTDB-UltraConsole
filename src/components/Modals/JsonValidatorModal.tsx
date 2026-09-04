@@ -15,7 +15,8 @@ import {
   CheckCircle2,
   AlertOctagon,
   Minimize2,
-  FileText
+  FileText,
+  Plus
 } from 'lucide-react';
 import {
   validateJson,
@@ -30,6 +31,7 @@ interface JsonValidatorModalProps {
   initialContent?: string;
   initialFileName?: string;
   currentAppData?: any;
+  targetMode?: 'database' | 'nodeValue';
   onApplyToApp: (repairedData: any, fileName?: string) => void;
   onClose: () => void;
 }
@@ -39,6 +41,7 @@ export const JsonValidatorModal: React.FC<JsonValidatorModalProps> = ({
   initialContent = '',
   initialFileName = 'data.json',
   currentAppData,
+  targetMode = 'database',
   onApplyToApp,
   onClose,
 }) => {
@@ -55,7 +58,7 @@ export const JsonValidatorModal: React.FC<JsonValidatorModalProps> = ({
     if (isOpen) {
       if (initialContent) {
         setJsonText(initialContent);
-        setSourceName(initialFileName || 'uploaded_data.json');
+        setSourceName(initialFileName || (targetMode === 'nodeValue' ? 'node_value.json' : 'uploaded_data.json'));
       } else if (currentAppData) {
         setJsonText(JSON.stringify(currentAppData, null, 2));
         setSourceName(initialFileName || 'current_database.json');
@@ -66,17 +69,43 @@ export const JsonValidatorModal: React.FC<JsonValidatorModalProps> = ({
       setAutoFixNotice(null);
       setApplied(false);
     }
-  }, [isOpen, initialContent, initialFileName, currentAppData]);
+  }, [isOpen, initialContent, initialFileName, currentAppData, targetMode]);
 
   // Real-time validation
   const validationResult: JsonValidationResult = useMemo(() => {
     return validateJson(jsonText);
   }, [jsonText]);
 
-  if (!isOpen) return null;
-
   const lines = jsonText.split('\n');
   const error = validationResult.error;
+
+  const handleJumpToErrorLine = () => {
+    if (!error || !textareaRef.current) return;
+    const errLine = error.location.line;
+    let targetIndex = 0;
+    for (let i = 0; i < errLine - 1 && i < lines.length; i++) {
+      targetIndex += lines[i].length + 1;
+    }
+    targetIndex += Math.max(0, error.location.column - 1);
+
+    textareaRef.current.focus();
+    textareaRef.current.setSelectionRange(targetIndex, Math.min(targetIndex + 1, jsonText.length));
+
+    const lineHeight = 20;
+    textareaRef.current.scrollTop = Math.max(0, (errLine - 3) * lineHeight);
+  };
+
+  // Jump to error line automatically on initial open if invalid
+  useEffect(() => {
+    if (isOpen && error) {
+      const timer = setTimeout(() => {
+        handleJumpToErrorLine();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, Boolean(error)]);
+
+  if (!isOpen) return null;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(jsonText);
@@ -90,7 +119,7 @@ export const JsonValidatorModal: React.FC<JsonValidatorModalProps> = ({
       setJsonText(res.formatted);
       setAutoFixNotice(['Formatted JSON cleanly with 2-space indentation.']);
     } else {
-      alert('Cannot format invalid JSON. Please fix the error first or use Auto-Fix.');
+      alert('Cannot format invalid JSON. Please fix the error first or click Auto-Fix.');
     }
   };
 
@@ -106,16 +135,41 @@ export const JsonValidatorModal: React.FC<JsonValidatorModalProps> = ({
 
   const handleAutoFix = () => {
     const res = autoRepairJson(jsonText);
+    setJsonText(res.repairedText);
     if (res.success) {
-      setJsonText(res.repairedText);
       setAutoFixNotice(res.fixesApplied);
     } else {
-      setJsonText(res.repairedText);
       setAutoFixNotice(
         res.fixesApplied.length > 0
-          ? [...res.fixesApplied, res.error || 'Check remaining error.']
+          ? [...res.fixesApplied, res.error || 'Check remaining syntax issue.']
           : [res.error || 'Could not automatically repair all issues.']
       );
+    }
+  };
+
+  const handleInsertExactFix = () => {
+    if (!error?.exactFix) {
+      handleAutoFix();
+      return;
+    }
+
+    const token = error.exactFix.tokenToInsert;
+    if (token === undefined) {
+      handleAutoFix();
+      return;
+    }
+
+    const pos = error.exactFix.insertPosition !== undefined ? error.exactFix.insertPosition : error.location.position;
+    const safePos = Math.max(0, Math.min(pos, jsonText.length));
+    const newText = jsonText.slice(0, safePos) + token + jsonText.slice(safePos);
+
+    const repaired = autoRepairJson(newText);
+    if (repaired.success) {
+      setJsonText(repaired.repairedText);
+      setAutoFixNotice([`Auto-inserted missing "${token.trim()}" and resolved syntax cleanly.`]);
+    } else {
+      setJsonText(newText);
+      setAutoFixNotice([`Inserted "${token.trim()}" at Line ${error.location.line}.`]);
     }
   };
 
@@ -154,19 +208,6 @@ export const JsonValidatorModal: React.FC<JsonValidatorModalProps> = ({
     }, 800);
   };
 
-  const handleJumpToErrorLine = () => {
-    if (!error || !textareaRef.current) return;
-    const errLine = error.location.line;
-    let targetIndex = 0;
-    for (let i = 0; i < errLine - 1 && i < lines.length; i++) {
-      targetIndex += lines[i].length + 1;
-    }
-    targetIndex += error.location.column - 1;
-
-    textareaRef.current.focus();
-    textareaRef.current.setSelectionRange(targetIndex, targetIndex + 1);
-  };
-
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-200">
       <div className="bg-[#10141d] border border-firebase-border rounded-xl w-full max-w-5xl h-[90vh] flex flex-col shadow-2xl overflow-hidden font-sans text-slate-200">
@@ -182,9 +223,14 @@ export const JsonValidatorModal: React.FC<JsonValidatorModalProps> = ({
                 <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono border border-slate-700">
                   {sourceName}
                 </span>
+                {targetMode === 'nodeValue' && (
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/40 font-semibold">
+                    Node Field Mode
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-400">
-                Inspect syntax errors, pinpoint exact line/column, and fix on site.
+                Inspect syntax errors, pinpoint exact line/column, and auto-add missing braces, commas, and quotes.
               </p>
             </div>
           </div>
@@ -200,11 +246,11 @@ export const JsonValidatorModal: React.FC<JsonValidatorModalProps> = ({
               <button
                 onClick={handleJumpToErrorLine}
                 className="flex items-center gap-1.5 px-3 py-1 bg-rose-500/20 border border-rose-500/50 text-rose-300 hover:bg-rose-500/30 rounded-full text-xs font-semibold transition"
-                title="Click to jump to error position"
+                title="Click to jump to exact error position"
               >
                 <AlertOctagon className="w-4 h-4 text-rose-400 animate-pulse" />
                 <span>
-                  Error on Line {error?.location.line}, Col {error?.location.column}
+                  Error on Line {error?.location.line}, Col {error?.location.column} (Click to jump)
                 </span>
               </button>
             )}
@@ -225,12 +271,12 @@ export const JsonValidatorModal: React.FC<JsonValidatorModalProps> = ({
             {/* Auto Fix Button */}
             <button
               onClick={handleAutoFix}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold transition shadow-sm ${
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-md font-bold transition shadow-sm ${
                 !validationResult.isValid
-                  ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20'
+                  ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20 ring-2 ring-amber-500/50 animate-pulse'
                   : 'bg-firebase-card hover:bg-firebase-hover text-amber-300 border border-amber-500/30'
               }`}
-              title="Auto-repair trailing commas, single quotes, unquoted keys, comments, etc."
+              title="Auto-insert missing braces, brackets, commas, colons, quotes, and format JSON"
             >
               <Wrench className="w-3.5 h-3.5" />
               <span>Auto-Fix Errors</span>
@@ -294,7 +340,7 @@ export const JsonValidatorModal: React.FC<JsonValidatorModalProps> = ({
               <span>Upload File</span>
             </button>
 
-            {/* Apply & Import into Database */}
+            {/* Apply to App / Database */}
             <button
               onClick={handleApplyToApp}
               disabled={!validationResult.isValid}
@@ -303,25 +349,31 @@ export const JsonValidatorModal: React.FC<JsonValidatorModalProps> = ({
                   ? 'bg-firebase-blue hover:bg-blue-600 text-white shadow-lg shadow-blue-500/20'
                   : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
               }`}
-              title="Apply fixed JSON into the active database / editor"
+              title={targetMode === 'nodeValue' ? "Apply fixed JSON to node value" : "Apply fixed JSON to database"}
             >
               {applied ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <ArrowRight className="w-3.5 h-3.5" />}
-              <span>{applied ? 'Applied!' : 'Apply to Database'}</span>
+              <span>
+                {applied
+                  ? 'Applied!'
+                  : targetMode === 'nodeValue'
+                  ? 'Apply to Node Value'
+                  : 'Apply to Database'}
+              </span>
             </button>
           </div>
         </div>
 
-        {/* Notice / Auto-Fix Banner */}
+        {/* Notice / Auto-Fix Summary Banner */}
         {autoFixNotice && autoFixNotice.length > 0 && (
-          <div className="px-5 py-2 bg-purple-950/40 border-b border-purple-800/40 text-purple-200 text-xs flex items-center justify-between gap-2">
+          <div className="px-5 py-2 bg-emerald-950/40 border-b border-emerald-800/40 text-emerald-200 text-xs flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 overflow-x-auto">
-              <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />
-              <span className="font-semibold text-purple-300">Auto-Fix Summary:</span>
+              <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="font-bold text-emerald-300">Auto-Fix Result:</span>
               <span>{autoFixNotice.join(' • ')}</span>
             </div>
             <button
               onClick={() => setAutoFixNotice(null)}
-              className="text-purple-400 hover:text-white shrink-0 ml-2"
+              className="text-emerald-400 hover:text-white shrink-0 ml-2"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -332,53 +384,73 @@ export const JsonValidatorModal: React.FC<JsonValidatorModalProps> = ({
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
           {/* Diagnostic Error Banner when Invalid */}
           {!validationResult.isValid && error && (
-            <div className="p-4 bg-rose-950/40 border-b border-rose-900/50 flex flex-col gap-2 shrink-0">
+            <div className="p-4 bg-rose-950/40 border-b border-rose-900/50 flex flex-col gap-2.5 shrink-0">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-start gap-2.5">
                   <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-bold text-rose-200 text-sm">{error.title}</span>
-                      <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-mono font-bold">
-                        Line {error.location.line}, Column {error.location.column}
-                      </span>
+                      <button
+                        onClick={handleJumpToErrorLine}
+                        className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/40 text-xs font-mono font-bold transition"
+                        title="Click to place cursor at error line"
+                      >
+                        Line {error.location.line}, Column {error.location.column} (Click to jump)
+                      </button>
                     </div>
                     <p className="text-xs text-rose-200/90 mt-1 font-sans">
                       {error.message}
                     </p>
+                    {error.exactFix && (
+                      <div className="mt-1 text-xs text-amber-300 font-semibold flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span>Exact fix: {error.exactFix.description}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                  {error.exactFix?.tokenToInsert && (
+                    <button
+                      onClick={handleInsertExactFix}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-md text-xs font-bold transition shadow-sm"
+                      title={error.exactFix.description}
+                    >
+                      <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                      <span>{error.exactFix.action}</span>
+                    </button>
+                  )}
                   <button
                     onClick={handleAutoFix}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-md text-xs font-bold transition shadow-sm"
                   >
                     <Wrench className="w-3.5 h-3.5" />
-                    <span>Auto-Fix Now</span>
+                    <span>Auto-Fix All Errors</span>
                   </button>
                 </div>
               </div>
 
-              {/* Snippet Context */}
+              {/* Exact Snippet Context with High-Contrast Indicator */}
               <div className="mt-1 bg-[#0b0e14] border border-rose-900/40 rounded-lg p-2.5 font-mono text-xs overflow-x-auto">
                 <div className="text-[11px] text-slate-400 mb-1.5 flex items-center justify-between border-b border-slate-800 pb-1 font-sans">
-                  <span>Error Line Preview:</span>
-                  <span className="text-amber-400 font-semibold">💡 Fix: {error.suggestion}</span>
+                  <span className="font-semibold text-slate-300">Exact Error Location:</span>
+                  <span className="text-amber-400 font-semibold">💡 What to add: {error.suggestion}</span>
                 </div>
                 {error.location.snippet.lines.map((snip, idx) => (
                   <div
                     key={idx}
                     className={`flex items-start gap-3 px-1 py-0.5 rounded ${
-                      snip.isErrorLine ? 'bg-rose-950/60 text-rose-300 font-bold' : 'text-slate-400'
+                      snip.isErrorLine ? 'bg-rose-950/60 text-rose-200 font-bold' : 'text-slate-400'
                     }`}
                   >
                     <span className="w-8 text-right select-none text-slate-600 shrink-0">
                       {snip.indicator ? '' : snip.lineNum}
                     </span>
-                    <pre className="whitespace-pre overflow-x-auto text-xs">
+                    <pre className="whitespace-pre overflow-x-auto text-xs font-mono">
                       {snip.indicator ? (
-                        <span className="text-rose-400 font-black">{snip.text}</span>
+                        <span className="text-amber-300 font-black tracking-wide">{snip.text}</span>
                       ) : (
                         snip.text
                       )}
@@ -412,9 +484,13 @@ export const JsonValidatorModal: React.FC<JsonValidatorModalProps> = ({
                 return (
                   <div
                     key={i}
+                    onClick={isError ? handleJumpToErrorLine : undefined}
                     className={`leading-relaxed ${
-                      isError ? 'text-rose-400 font-bold bg-rose-500/20 -mr-3 pr-3' : ''
+                      isError
+                        ? 'text-amber-300 font-bold bg-rose-600/30 -mr-3 pr-3 border-r-2 border-amber-400 cursor-pointer'
+                        : ''
                     }`}
+                    title={isError ? `Click to jump to error on line ${lineNum}` : undefined}
                   >
                     {lineNum}
                   </div>
@@ -444,9 +520,15 @@ export const JsonValidatorModal: React.FC<JsonValidatorModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2 text-[11px]">
-            <span className="text-slate-400">
-              💡 Tip: Click <strong>Auto-Fix Errors</strong> to automatically repair trailing commas, quotes, and keys.
-            </span>
+            {!validationResult.isValid ? (
+              <span className="text-amber-300 font-semibold">
+                ⚠️ Syntax error detected. Click <strong>Auto-Fix Errors</strong> to automatically insert missing tokens.
+              </span>
+            ) : (
+              <span className="text-emerald-400">
+                ✅ JSON is valid. Click Prettify to reformat or Apply to save.
+              </span>
+            )}
           </div>
         </div>
       </div>

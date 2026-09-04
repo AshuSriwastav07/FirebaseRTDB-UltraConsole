@@ -9,11 +9,14 @@ import {
   Layers,
   ChevronRight,
   ShieldAlert,
-  Code
+  Code,
+  Wrench,
+  Sparkles
 } from 'lucide-react';
 import { DataType, NodePath } from '../../types/json';
 import { detectType, coerceType, getTypeBadgeInfo } from '../../utils/typeDetection';
 import { getType, pathToString, getValueByPath } from '../../utils/jsonOperations';
+import { validateJson, autoRepairJson } from '../../utils/jsonValidator';
 
 interface RightPanelProps {
   rootData: any;
@@ -22,7 +25,7 @@ interface RightPanelProps {
   onUpdateValue: (path: NodePath, newValue: any) => void;
   onRenameKey: (parentPath: NodePath, oldKey: string, newKey: string) => void;
   onDeleteNode: (path: NodePath) => void;
-  onOpenValidator?: (initialContent?: string) => void;
+  onOpenValidator?: (initialContent?: string, onApplyCallback?: (fixedText: string) => void) => void;
 }
 
 export const RightPanel: React.FC<RightPanelProps> = ({
@@ -48,6 +51,20 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
   // Confirm delete modal state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const handleAutoFixAddValue = () => {
+    const res = autoRepairJson(addValueInput);
+    if (res.repairedText) {
+      setAddValueInput(res.repairedText);
+    }
+  };
+
+  const handleAutoFixEditValue = () => {
+    const res = autoRepairJson(editValueInput);
+    if (res.repairedText) {
+      setEditValueInput(res.repairedText);
+    }
+  };
 
   const nodeValue = useMemo(() => {
     return getValueByPath(rootData, selectedPath);
@@ -293,24 +310,51 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 </span>
               </div>
 
-              {/* Syntax Warning Banner */}
-              {addDetected.isInvalidJsonSyntax && (
-                <div className="p-2 bg-rose-500/10 border border-rose-500/30 rounded text-[11px] text-rose-300 flex flex-col gap-1.5">
-                  <div className="flex items-start gap-1.5">
-                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
-                    <span>{addDetected.warningMessage}</span>
+              {/* Syntax Warning Banner with Auto-Fix & Exact Error Pinpointing */}
+              {addDetected.isInvalidJsonSyntax && (() => {
+                const diag = validateJson(addValueInput);
+                return (
+                  <div className="p-2.5 bg-rose-500/10 border border-rose-500/30 rounded-lg text-xs text-rose-300 flex flex-col gap-2">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-rose-200 flex items-center gap-1.5 flex-wrap">
+                          <span>{diag.error?.title || "Invalid JSON Syntax"}</span>
+                          {diag.error && (
+                            <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[10px] font-mono">
+                              Line {diag.error.location.line}, Col {diag.error.location.column}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-amber-300 mt-0.5 font-medium">
+                          👉 {diag.error?.suggestion || addDetected.warningMessage}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-end gap-2 pt-1 border-t border-rose-500/20">
+                      <button
+                        type="button"
+                        onClick={handleAutoFixAddValue}
+                        className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded text-xs font-bold transition flex items-center gap-1 shadow-sm"
+                        title="Auto-insert missing braces, brackets, commas, or quotes"
+                      >
+                        <Wrench className="w-3 h-3" />
+                        <span>⚡ Auto-Fix Now</span>
+                      </button>
+                      {onOpenValidator && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenValidator(addValueInput, (fixed) => setAddValueInput(fixed))}
+                          className="px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/40 rounded text-xs font-semibold transition"
+                          title="Inspect exact error location on site"
+                        >
+                          🔍 Inspect on Site
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  {onOpenValidator && (
-                    <button
-                      type="button"
-                      onClick={() => onOpenValidator(addValueInput)}
-                      className="self-end px-2 py-0.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/40 rounded text-[10px] font-sans font-semibold transition"
-                    >
-                      🔍 Inspect & Fix Error on Site
-                    </button>
-                  )}
-                </div>
-              )}
+                );
+              })()}
 
               {/* Live Parsed Preview */}
               <div className="text-[10px] text-slate-400 space-y-1">
@@ -401,23 +445,51 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 </span>
               </div>
 
-              {editDetected.isInvalidJsonSyntax && (
-                <div className="p-2 bg-rose-500/10 border border-rose-500/30 rounded text-[11px] text-rose-300 flex flex-col gap-1.5">
-                  <div className="flex items-start gap-1.5">
-                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
-                    <span>{editDetected.warningMessage}</span>
+              {/* Syntax Warning Banner with Auto-Fix & Exact Error Pinpointing */}
+              {editDetected.isInvalidJsonSyntax && (() => {
+                const diag = validateJson(editValueInput);
+                return (
+                  <div className="p-2.5 bg-rose-500/10 border border-rose-500/30 rounded-lg text-xs text-rose-300 flex flex-col gap-2">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-rose-200 flex items-center gap-1.5 flex-wrap">
+                          <span>{diag.error?.title || "Invalid JSON Syntax"}</span>
+                          {diag.error && (
+                            <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[10px] font-mono">
+                              Line {diag.error.location.line}, Col {diag.error.location.column}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-amber-300 mt-0.5 font-medium">
+                          👉 {diag.error?.suggestion || editDetected.warningMessage}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-end gap-2 pt-1 border-t border-rose-500/20">
+                      <button
+                        type="button"
+                        onClick={handleAutoFixEditValue}
+                        className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded text-xs font-bold transition flex items-center gap-1 shadow-sm"
+                        title="Auto-insert missing braces, brackets, commas, or quotes"
+                      >
+                        <Wrench className="w-3 h-3" />
+                        <span>⚡ Auto-Fix Now</span>
+                      </button>
+                      {onOpenValidator && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenValidator(editValueInput, (fixed) => setEditValueInput(fixed))}
+                          className="px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/40 rounded text-xs font-semibold transition"
+                          title="Inspect exact error location on site"
+                        >
+                          🔍 Inspect on Site
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  {onOpenValidator && (
-                    <button
-                      type="button"
-                      onClick={() => onOpenValidator(editValueInput)}
-                      className="self-end px-2 py-0.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/40 rounded text-[10px] font-sans font-semibold transition"
-                    >
-                      🔍 Inspect & Fix Error on Site
-                    </button>
-                  )}
-                </div>
-              )}
+                );
+              })()}
             </div>
 
             {/* Submit Edit */}

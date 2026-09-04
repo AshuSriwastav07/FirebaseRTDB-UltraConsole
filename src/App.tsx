@@ -58,6 +58,8 @@ export const App: React.FC = () => {
   const [isBackupHistoryOpen, setIsBackupHistoryOpen] = useState(false);
   const [validatorContent, setValidatorContent] = useState('');
   const [validatorFileName, setValidatorFileName] = useState('');
+  const [validatorTargetMode, setValidatorTargetMode] = useState<'database' | 'nodeValue'>('database');
+  const [validatorTargetCallback, setValidatorTargetCallback] = useState<((fixedText: string) => void) | null>(null);
 
   // 100% Transient In-Memory Firebase Credentials State (Never saved to localStorage or disk)
   const [firebaseConfig, setFirebaseConfig] = useState<FirebaseConfig | null>(null);
@@ -185,18 +187,45 @@ export const App: React.FC = () => {
     importJsonData(newJsonData, newFileName, handle);
   };
 
-  const handleOpenValidator = (content?: string, customFileName?: string) => {
+  const handleOpenValidator = (
+    content?: string,
+    customFileNameOrCallback?: string | ((fixedText: string) => void),
+    onApplyCallback?: (fixedText: string) => void
+  ) => {
+    let customFileName: string | undefined;
+    let callback: ((fixedText: string) => void) | undefined;
+
+    if (typeof customFileNameOrCallback === 'function') {
+      callback = customFileNameOrCallback;
+    } else {
+      customFileName = customFileNameOrCallback;
+      callback = onApplyCallback;
+    }
+
     if (content !== undefined) {
       setValidatorContent(content);
-      setValidatorFileName(customFileName || 'invalid_data.json');
+      setValidatorFileName(customFileName || 'node_value.json');
+      setValidatorTargetMode(callback ? 'nodeValue' : 'database');
+      setValidatorTargetCallback(callback ? () => callback : null);
     } else {
       setValidatorContent(JSON.stringify(activeData, null, 2));
       setValidatorFileName(fileName || 'current_database.json');
+      setValidatorTargetMode('database');
+      setValidatorTargetCallback(null);
     }
     setIsValidatorModalOpen(true);
   };
 
   const handleApplyValidatedJson = (repairedData: any, newFileName?: string) => {
+    if (validatorTargetCallback) {
+      const formatted = typeof repairedData === 'string'
+        ? repairedData
+        : JSON.stringify(repairedData, null, 2);
+      validatorTargetCallback(formatted);
+      setIsValidatorModalOpen(false);
+      setValidatorTargetCallback(null);
+      return;
+    }
     handleImportJson(repairedData, newFileName || fileName || 'fixed_data.json');
   };
 
@@ -325,8 +354,12 @@ export const App: React.FC = () => {
         initialContent={validatorContent}
         initialFileName={validatorFileName}
         currentAppData={activeData}
+        targetMode={validatorTargetMode}
         onApplyToApp={handleApplyValidatedJson}
-        onClose={() => setIsValidatorModalOpen(false)}
+        onClose={() => {
+          setIsValidatorModalOpen(false);
+          setValidatorTargetCallback(null);
+        }}
       />
 
       {/* Consolidated Settings Modal */}

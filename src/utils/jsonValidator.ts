@@ -114,20 +114,47 @@ export function getLocationFromPosition(text: string, position: number): JsonErr
 
   for (let i = startIdx; i <= endIdx; i++) {
     const isErr = i === lineIndex;
-    snippetLines.push({
-      lineNum: i + 1,
-      text: lines[i],
-      isErrorLine: isErr,
-    });
-    if (isErr) {
-      const padLen = Math.max(0, colIndex);
-      const indicator = ' '.repeat(padLen) + '^-- Error location';
+    const rawLine = lines[i] || '';
+
+    // If this is the error line and it's long, window it around colIndex!
+    if (isErr && rawLine.length > 100) {
+      const windowRadius = 40;
+      const startCol = Math.max(0, colIndex - windowRadius);
+      const endCol = Math.min(rawLine.length, colIndex + windowRadius);
+      const prefix = startCol > 0 ? '... ' : '';
+      const suffix = endCol < rawLine.length ? ' ...' : '';
+      const windowedText = prefix + rawLine.slice(startCol, endCol) + suffix;
+
+      snippetLines.push({
+        lineNum: i + 1,
+        text: windowedText,
+        isErrorLine: true,
+      });
+
+      const padLen = prefix.length + (colIndex - startCol);
+      const indicator = ' '.repeat(Math.max(0, padLen)) + '^-- Error location';
       snippetLines.push({
         lineNum: i + 1,
         text: indicator,
         isErrorLine: true,
         indicator,
       });
+    } else {
+      snippetLines.push({
+        lineNum: i + 1,
+        text: rawLine,
+        isErrorLine: isErr,
+      });
+      if (isErr) {
+        const padLen = Math.max(0, colIndex);
+        const indicator = ' '.repeat(padLen) + '^-- Error location';
+        snippetLines.push({
+          lineNum: i + 1,
+          text: indicator,
+          isErrorLine: true,
+          indicator,
+        });
+      }
     }
   }
 
@@ -307,11 +334,39 @@ function categorizeError(text: string, location: JsonErrorLocation, rawErrorMsg:
     };
   }
 
-  // 2. Trailing Comma Check
-  if (
-    /,\s*[}\]]/.test(snippetAround) ||
-    /,\s*$/.test(lineContent.slice(0, column + 2)) && /^\s*[}\]]/.test(afterPos)
-  ) {
+  // 2. Expected ',' or '}' after property value (prematurely closed string, unescaped triple quotes, or missing comma)
+  if (lowerMsg.includes('expected') && (lowerMsg.includes('after property') || lowerMsg.includes("',' or '}'"))) {
+    const beforeSnippet = text.slice(Math.max(0, position - 40), position);
+    const afterSnippet = text.slice(position, Math.min(text.length, position + 40));
+    const hasTripleQuotes = /"""|'''/.test(beforeSnippet + afterSnippet);
+
+    return {
+      title: hasTripleQuotes ? 'Unescaped Triple Quotes (""")' : 'Prematurely Closed String or Missing Comma',
+      message: hasTripleQuotes
+        ? `Unescaped triple quotes (""") detected near Line ${location.line}, Column ${location.column}. In JSON, internal quotes must be escaped as \\"\\"\\".`
+        : `A string was closed prematurely by an unescaped quotation mark, or a comma (,) is missing after the property value at Line ${location.line}, Column ${location.column}.`,
+      category: hasTripleQuotes ? 'unclosed_string' : 'missing_comma',
+      suggestion: hasTripleQuotes
+        ? 'Click Auto-Fix to automatically escape triple quotes as \\"\\"\\".'
+        : 'Escape internal quotes as \\" or add a comma (,) between properties.',
+      autoFixable: true,
+      exactFix: {
+        action: hasTripleQuotes ? 'Escape triple quotes' : 'Insert comma (,)',
+        tokenToInsert: hasTripleQuotes ? undefined : ',',
+        insertPosition: position,
+        description: hasTripleQuotes ? 'Escape triple quotes (""")' : `Add comma (,) at Line ${location.line}, Col ${location.column}`,
+      },
+    };
+  }
+
+  // 3. Trailing Comma Check (STRICT: only right at comma before } or ])
+  const textBefore = text.slice(Math.max(0, position - 10), position).trim();
+  const textAfter = text.slice(position, Math.min(text.length, position + 10)).trim();
+  const isTrailingComma =
+    ((textBefore.endsWith(',') || text.slice(Math.max(0, position - 2), position).includes(',')) && (textAfter.startsWith('}') || textAfter.startsWith(']'))) ||
+    (lowerMsg.includes('unexpected') && (textAfter.startsWith('}') || textAfter.startsWith(']')) && textBefore.endsWith(','));
+
+  if (isTrailingComma) {
     return {
       title: 'Trailing Comma',
       message: `Extra comma before closing bracket/brace at Line ${location.line}, Column ${location.column}.`,
@@ -550,6 +605,14 @@ export function autoRepairJson(raw: string): AutoRepairResult {
   for (let pass = 0; pass < 4; pass++) {
     const prevText = text;
 
+    // 0. Escape unescaped triple quotes (""" and ''') inside markdown/strings
+    if (/(?<!\\)"""|(?<!\\)'''/.test(text)) {
+      text = text
+        .replace(/(?<!\\)"""/g, '\\"\\"\\"')
+        .replace(/(?<!\\)'''/g, "\\'\\'\\'");
+      fixes.push('Escaped unescaped triple quotes (""" / \'\'\') inside strings');
+    }
+
     // 1. Normalize smart/curly quotes and backticks
     if (/[“”‘’`]/.test(text)) {
       text = text
@@ -682,8 +745,21 @@ export function autoRepairJson(raw: string): AutoRepairResult {
     const openStack = getUnclosedBracketStack(text);
     if (openStack.length > 0) {
       const closingChars = [...openStack].reverse().join('\n');
-      text = text.trimEnd() + '\n' + closingChars;
-      fixes.push(`Auto-closed ${openStack.length} missing bracket/brace: ${closingChars.replace(/\n/g, ' ')}`);
+      const textWithClosing = text.trimEnd() + '\n' + closingChars;
+      // ONLY keep closing brackets if they actually produce valid JSON or don't break valid text
+      try {
+        const parsed = JSON.parse(textWithClosing);
+        text = textWithClosing;
+        fixes.push(`Auto-closed ${openStack.length} missing bracket/brace: ${closingChars.replace(/\n/g, ' ')}`);
+        return {
+          success: true,
+          repairedText: JSON.stringify(parsed, null, 2),
+          fixesApplied: Array.from(new Set(fixes)),
+          parsedData: parsed,
+        };
+      } catch {
+        // If appending closing brackets didn't make it valid, do not pollute with trailing braces
+      }
     }
 
     // Remove any trailing commas exposed by adding closing brackets

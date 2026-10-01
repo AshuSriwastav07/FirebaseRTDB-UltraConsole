@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
-import { getDatabase, ref, onValue, set, remove, Database } from 'firebase/database';
+import { getDatabase, ref, onValue, set, update, remove, Database } from 'firebase/database';
 import { FirebaseConfig, NodePath } from '../types/json';
 
 export function useFirebaseRtdb(config: FirebaseConfig | null, active: boolean) {
@@ -88,13 +88,40 @@ export function useFirebaseRtdb(config: FirebaseConfig | null, active: boolean) 
     if (!db) return { success: false, error: 'Database not initialized' };
     try {
       const rootRef = ref(db, '/');
-      await set(rootRef, data);
+
+      // If data is not a plain object (array, primitive, null), fall back to set()
+      if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+        await set(rootRef, data);
+        setIsExternalChangeDetected(false);
+        return { success: true };
+      }
+
+      // Use chunked update() per top-level key to avoid "Write too large" errors.
+      // Firebase's set() on root sends the entire tree as one atomic write which
+      // can exceed the ~16MB single-write limit. update() writes each key separately.
+      const keys = Object.keys(data);
+      const CHUNK_SIZE = 20; // keys per batch
+
+      for (let i = 0; i < keys.length; i += CHUNK_SIZE) {
+        const chunk: Record<string, any> = {};
+        for (let j = i; j < Math.min(i + CHUNK_SIZE, keys.length); j++) {
+          chunk[keys[j]] = data[keys[j]];
+        }
+        await update(rootRef, chunk);
+      }
+
       setIsExternalChangeDetected(false);
       return { success: true };
     } catch (err: any) {
       console.error('Push to Firebase error:', err);
-      alert('Push to Live Firebase Failed: ' + (err.message || 'Permission denied'));
-      return { success: false, error: err.message };
+      const msg = err.message || 'Unknown error';
+      const userMsg = msg.includes('too large')
+        ? 'Data is too large for Firebase. Try reducing the dataset size or splitting into smaller nodes.'
+        : msg.includes('PERMISSION_DENIED')
+        ? 'Permission denied. Check your Firebase Security Rules.'
+        : `Push failed: ${msg}`;
+      alert(userMsg);
+      return { success: false, error: msg };
     }
   }, [db]);
 

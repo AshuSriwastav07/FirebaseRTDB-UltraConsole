@@ -89,25 +89,22 @@ export function useFirebaseRtdb(config: FirebaseConfig | null, active: boolean) 
     try {
       const rootRef = ref(db, '/');
 
-      // If data is not a plain object (array, primitive, null), fall back to set()
-      if (data === null || typeof data !== 'object' || Array.isArray(data)) {
-        await set(rootRef, data);
-        setIsExternalChangeDetected(false);
-        return { success: true };
-      }
-
-      // Use chunked update() per top-level key to avoid "Write too large" errors.
-      // Firebase's set() on root sends the entire tree as one atomic write which
-      // can exceed the ~16MB single-write limit. update() writes each key separately.
-      const keys = Object.keys(data);
-      const CHUNK_SIZE = 20; // keys per batch
-
-      for (let i = 0; i < keys.length; i += CHUNK_SIZE) {
-        const chunk: Record<string, any> = {};
-        for (let j = i; j < Math.min(i + CHUNK_SIZE, keys.length); j++) {
-          chunk[keys[j]] = data[keys[j]];
-        }
-        await update(rootRef, chunk);
+      // Ponytail approach: Bypass the SDK's websocket write queue entirely.
+      // A raw PUT request is atomic, correctly replaces the data (unlike update), 
+      // allows much larger payloads (256MB REST limit vs 16MB SDK limit), 
+      // and doesn't get stuck in the SDK's retry loops.
+      const url = config?.databaseURL;
+      if (!url) throw new Error("Database URL is missing");
+      
+      const response = await fetch(`${url.replace(/\/$/, '')}/.json`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(errText || `HTTP ${response.status}`);
       }
 
       setIsExternalChangeDetected(false);
